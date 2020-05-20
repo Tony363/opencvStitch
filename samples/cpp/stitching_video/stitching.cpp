@@ -136,6 +136,11 @@ int main(int argc, char* argv[])
     // Loop through all the stream
     while ( leftCapture.isOpened() && rightCapture.isOpened())
     {
+        // Frame processing starting time
+        // Start timer
+        static auto startTimeFrame = high_resolution_clock::now(); 
+
+
         // Initialize left frame and right frame
         Mat leftFrame;
         Mat rightFrame;
@@ -212,9 +217,14 @@ int main(int argc, char* argv[])
 
         
         // Save frame in video
-        outputVideo.write(pano);
-        cout << CODE_INFO << "stitching frame : " << readFrame << " completed successfully.\n";
+        outputVideo.write(pano); 
 
+        // End timer
+        // Stop time
+        static auto stopTimeFrame = high_resolution_clock::now(); 
+        static auto durationTimeFrame = duration_cast<microseconds>(stopTimeFrame - startTimeFrame);
+        cout << CODE_INFO << "stitching frame : " << readFrame << " completed successfully. " << durationTimeFrame.count() / 1000<< "ms." << endl;
+        
         // Update reading state and clear images vector
         readFrame++;
         imgs.clear();
