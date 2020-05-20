@@ -1,0 +1,4 @@
+cmake .
+make
+./stitching /media/david/Elements/teamplay/tennis/sync/l1.mp4 /media/david/Elements/teamplay/tennis/sync/r1.mp4 --output result_full.mp4 --stop 10185
+
