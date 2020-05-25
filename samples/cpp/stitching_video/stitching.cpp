@@ -25,6 +25,7 @@ int outputHeight = 3000;
 int outputFPS = 60;
 vector<string> video_names;
 int readFrame = 0;
+int startFrame = 0 ;
 int stopFrame = 0;
 bool isInitialized = false;
 bool show = false;
@@ -52,6 +53,7 @@ string CODE_ERROR = "[ERROR] ";
 void printUsage(char** argv);
 int parseCmdArgs(int argc, char** argv);
 void cleanImgs();
+void initStartFrame(int &startFrame,VideoCapture &leftCapture,VideoCapture &rightCapture, Mat &leftFrame, Mat &rightFrame);
 
 
 
@@ -144,6 +146,10 @@ int main(int argc, char* argv[])
         // Initialize left frame and right frame
         Mat leftFrame;
         Mat rightFrame;
+        // Start the stitching on the given frame by providing the frame number
+        if (startFrame != 0)
+            initStartFrame(startFrame,leftCapture,rightCapture, leftFrame, rightFrame);
+
 
         // Read frame from left stream
         leftCapture >> leftFrame;
@@ -223,7 +229,7 @@ int main(int argc, char* argv[])
         // Stop time
         static auto stopTimeFrame = high_resolution_clock::now(); 
         static auto durationTimeFrame = duration_cast<microseconds>(stopTimeFrame - startTimeFrame);
-        cout << CODE_INFO << "stitching frame : " << readFrame << " completed successfully. " << durationTimeFrame.count() / 1000<< "ms." << endl;
+        cout << CODE_INFO << "stitching frame : " << readFrame << "/" << stopFrame<< " completed successfully. " << durationTimeFrame.count() / 1000<< "ms." << endl;
         
         // Update reading state and clear images vector
         readFrame++;
@@ -379,6 +385,13 @@ int parseCmdArgs(int argc, char** argv)
             i++;
         }
 
+        else if (string(argv[i]) == "--start")
+        {
+            startFrame = stoi(argv[i+1]);
+            i++;
+        }
+
+
         else if (string(argv[i]) == "--fps")
         {
             outputFPS = stoi(argv[i+1]);
@@ -428,6 +441,17 @@ int parseCmdArgs(int argc, char** argv)
 }
 
 
+void initStartFrame(int &startFrame,VideoCapture &leftCapture,VideoCapture &rightCapture, Mat &leftFrame, Mat &rightFrame)
+{
+    for (int i  = 0 ; i < startFrame ; i++)
+    {
+        leftCapture >> leftFrame;
+        rightCapture >> rightFrame; 
+    }
+    cout << CODE_INFO << "Start frame initialized to "<< startFrame << endl;
+    startFrame = 0;
+    
+}
 void cleanImgs()
 {
     for (int i = 0 ; i < imgs.size() ; i++)
