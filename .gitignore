@@ -24,3 +24,10 @@ bin/
 build
 node_modules
 CMakeSettings.json
+
+# Ignore video file and image file
+*.mp4
+*.avi
+*.jpg
+*.jpeg
+*.png
