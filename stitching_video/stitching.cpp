@@ -31,9 +31,15 @@ bool isInitialized = false;
 bool show = false;
 int resizeWidth = 0;
 
+// Registration working image size
+double work_megapix = 0.6;
+
 // Default command line args
 Ptr<FeaturesMatcher> matcher;
 string matcher_type = "homography";
+
+// Initialize matcher confidence (ORB features defailt value is 0.3. Decrease this value if image has difficulty to stitch)
+float match_conf = 0.3f;
 
 // Warper creator settings
 Ptr<WarperCreator> warper;
@@ -49,6 +55,10 @@ string seam_finder_type = "";
 
 // Seam estimation image resolution
 double seam_megapix = 0.1;
+
+// Exposure compensator
+Ptr<ExposureCompensator> compensator;
+int expos_comp_type = ExposureCompensator::GAIN_BLOCKS;
 
 //int blender = Blender::FEATHER;
 
@@ -104,13 +114,28 @@ int main(int argc, char* argv[])
     // Initialize stitcher pointer, stitcher status and panorama output
     Ptr<Stitcher> stitcher = Stitcher::create(mode);
 
+
+    // Initialize work_megapix. Default is 0.6 Mpx.
+    if (work_megapix != 0.6)
+    {
+        cout << CODE_INFO <<  "Registration resolution set to "<< work_megapix << endl;
+        stitcher->setRegistrationResol(work_megapix);
+    }
+
     // Initialize matcher type. Default is homography.
+    
     if (matcher_type == "affine")
     {
-        cout << CODE_INFO <<  " Matcher is set to : affine"<< endl;
-        matcher = makePtr<AffineBestOf2NearestMatcher>();
+        cout << CODE_INFO <<  " Matcher is set to : affine, conf:" << match_conf<< endl;
+        matcher = makePtr<AffineBestOf2NearestMatcher>(false, false, match_conf); // second argument is CUDA support
         stitcher->setFeaturesMatcher(matcher);
 
+    }
+    else if (matcher_type == "homography")
+    {
+        cout << CODE_INFO <<  " Matcher is set to : homography conf:"<< match_conf<< endl;
+        matcher = makePtr<BestOf2NearestMatcher>(false, match_conf); 
+        stitcher->setFeaturesMatcher(matcher);
     }
     // Initialize warper type. Default is spherical
     if (warper_type != "")
@@ -138,17 +163,42 @@ int main(int argc, char* argv[])
 
     // Initialize seam_finder_type. Default is gc_color
     if (seam_finder_type != "")
-    {
-        cout << CODE_INFO <<  " Seam Finder set to gc_grad"<< endl;
-        seam_finder = makePtr<detail::GraphCutSeamFinder>(GraphCutSeamFinderBase::COST_COLOR_GRAD);
+    {   
+        
+        if (seam_finder_type == "no")
+            seam_finder = makePtr<detail::NoSeamFinder>();
+        else if (seam_finder_type == "voronoi")
+            seam_finder = makePtr<detail::VoronoiSeamFinder>();
+        else if (seam_finder_type == "gc_color")
+            seam_finder = makePtr<detail::GraphCutSeamFinder>(GraphCutSeamFinderBase::COST_COLOR);
+        else if (seam_finder_type == "gc_colorgrad")
+            seam_finder = makePtr<detail::GraphCutSeamFinder>(GraphCutSeamFinderBase::COST_COLOR_GRAD);
+        else if (seam_finder_type == "dp_color")
+            seam_finder = makePtr<detail::DpSeamFinder>(DpSeamFinder::COLOR);
+        else if (seam_finder_type == "dp_colorgrad")
+            seam_finder = makePtr<detail::DpSeamFinder>(DpSeamFinder::COLOR_GRAD);
+
+        if (!seam_finder)
+        {
+            cout << CODE_INFO  <<"Can't create the following seam finder '" << seam_finder_type << "'\n";
+            return 1;
+        }
+        cout << CODE_INFO <<  "Seam Finder set to "<< seam_finder_type << endl;
         stitcher->setSeamFinder(seam_finder);
     }
 
     // Initialize seam_megapix. Default is 0.1 Mpx.
     if (seam_megapix != 0.1)
     {
-        cout << CODE_INFO <<  " Seam estimation resolution set to "<< seam_megapix << endl;
+        cout << CODE_INFO <<  "Seam estimation resolution set to "<< seam_megapix << endl;
         stitcher->setSeamEstimationResol(seam_megapix);
+    }
+
+    
+    if (expos_comp_type != ExposureCompensator::GAIN_BLOCKS)
+    {
+        cout << CODE_INFO <<  "Exposure compensator set to "<< seam_megapix << endl;
+        stitcher->setExposureCompensator(compensator);
     }
 
     Stitcher::Status status;
@@ -319,16 +369,22 @@ void printUsage(char** argv)
          "      for stitching materials under affine transformation, such as scans.\n"
          "  --output <result_video>\n"
          "      The default is 'result.mp4'.\n"
+         "  --work_megapix <float>\n"
+         "      Resolution for image registration step. The default is 0.6 Mpx.\n"
          "  --warp (affine|plane|cylindrical|spherical)\n"
          "      Warp surface type. The default is 'spherical'.\n"
          "  --matcher (homography|affine)\n"
          "      Matcher used for pairwise image matching.\n"
+         "  --match_conf <float>\n"
+         "      Confidence for feature matching step. The default is 0.65 for surf and 0.3 for orb.\n"
          "  --blend (no|feather|multiband) \n"
          "      The default blender is MultiBandBlender \n"
          "  --seam (no|voronoi|gc_color|gc_colorgrad)\n"
          "      Seam estimation method. The default is 'gc_color'.\n"
          "  --seam_megapix <float>\n"
          "      Resolution for seam estimation step. The default is 0.1 Mpx.\n"
+         "  --expos_comp (no|gain|gain_blocks|channels|channels_blocks)\n"
+         "      Exposure compensation method. The default is 'gain_blocks'.\n"
          "  --show\n"
          "      Show each frame stitching preview.\n"   
          "  --stop <int>\n"
@@ -390,6 +446,17 @@ int parseCmdArgs(int argc, char** argv)
             }
             i++;
         }
+        else if (string(argv[i]) == "--work_megapix")
+        {
+            work_megapix = atof(argv[i + 1]);
+            i++;
+        }
+
+        else if (string(argv[i]) == "--seam_megapix")
+        {
+            seam_megapix = atof(argv[i + 1]);
+            i++;
+        }
 
         else if (string(argv[i]) == "--matcher")
         {
@@ -402,7 +469,11 @@ int parseCmdArgs(int argc, char** argv)
             }
             i++;
         }
-
+        else if (string(argv[i]) == "--match_conf")
+        {
+            match_conf = static_cast<float>(atof(argv[i + 1]));
+            i++;
+        }
         else if (string(argv[i]) == "--blend")
         {
             blender_type = argv[i+1];
@@ -424,7 +495,29 @@ int parseCmdArgs(int argc, char** argv)
             warper_type = argv[i+1];
             i++;
         }
+        else if (string(argv[i]) == "--expos_comp")
+        {
 
+            if (string(argv[i + 1]) == "no")
+                expos_comp_type = ExposureCompensator::NO;
+            else if (string(argv[i + 1]) == "gain")
+                expos_comp_type = ExposureCompensator::GAIN;
+            else if (string(argv[i + 1]) == "gain_blocks")
+                expos_comp_type = ExposureCompensator::GAIN_BLOCKS;
+            else if (string(argv[i + 1]) == "channels")
+                expos_comp_type = ExposureCompensator::CHANNELS;
+            else if (string(argv[i + 1]) == "channels_blocks")
+                expos_comp_type = ExposureCompensator::CHANNELS_BLOCKS;
+            else
+            {
+                cout << "Bad exposure compensation method\n";
+                return -1;
+            }
+
+            cout << CODE_INFO <<  "expos_comp set to "<< string(argv[i+1]) << endl;
+            compensator = ExposureCompensator::createDefault(expos_comp_type);
+            i++;
+        }
         else if (string(argv[i]) == "--stop")
         {
             stopFrame = stoi(argv[i+1]);
@@ -514,5 +607,6 @@ void cleanStitcherParams()
     blender.release();
     warper.release();
     seam_finder.release();
+    compensator.release();
     
 }
