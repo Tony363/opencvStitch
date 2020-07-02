@@ -3,6 +3,7 @@
 #include "opencv2/highgui.hpp"
 #include "opencv2/stitching.hpp"
 #include "opencv2/stitching/detail/blenders.hpp"
+#include "opencv2/stitching/detail/seam_finders.hpp"
 
 #include <iostream>
 #include <chrono>
@@ -10,18 +11,9 @@ using namespace std;
 using namespace cv;
 using namespace cv::detail;
 using namespace std::chrono; 
-#include <chrono>
-bool divide_images = false;
-bool try_use_gpu = false; // OpenCV should be built with CUDa flags enabled. Removed in OpenCV 4.0 ?
-Stitcher::Mode mode = Stitcher::PANORAMA;
-vector<Mat> imgs;
 
-string result_name = "result_video.mp4";
-char key = 'k';
 
 // Video parameters
-int outputWidth = 6000;
-int outputHeight = 3000;
 int outputFPS = 60;
 vector<string> video_names;
 int readFrame = 0;
@@ -30,6 +22,16 @@ int stopFrame = 0;
 bool isInitialized = false;
 bool show = false;
 int resizeWidth = 0;
+string result_name = "result_video.mp4";
+char key = 'k'; // Initialize quit key to a random char
+
+
+
+Stitcher::Mode mode = Stitcher::PANORAMA;
+vector<Mat> imgs;
+
+// GPU/CUDA support
+bool try_use_gpu = false; // OpenCV should be built with CUDa flags enabled. Removed in OpenCV 4.0 ?
 
 // Registration working image size
 double work_megapix = 0.6;
@@ -43,11 +45,11 @@ float match_conf = 0.3f;
 
 // Warper creator settings
 Ptr<WarperCreator> warper;
-string warper_type = "";
+string warper_type = "spherical";
 
 // Blender settings
 Ptr<Blender> blender;
-string blender_type = "";
+int blender_type = Blender::MULTI_BAND;
 
 // Seam finder settings
 Ptr<SeamFinder> seam_finder;
@@ -60,9 +62,9 @@ double seam_megapix = 0.1;
 Ptr<ExposureCompensator> compensator;
 int expos_comp_type = ExposureCompensator::GAIN_BLOCKS;
 
-//int blender = Blender::FEATHER;
 
-// output code information
+
+// Output return code information
 string CODE_INFO = "[INFO] ";
 string CODE_ERROR = "[ERROR] "; 
 
@@ -76,8 +78,9 @@ void initStartFrame(int &startFrame,VideoCapture &leftCapture,VideoCapture &righ
 
 
 
-// NB : modified version for videos
-// Please check original source code to get images stitcher instead of the below video stitcher
+// The main code is a modified version of the original image sticher from OpenCV.
+// The below modified code enables video support for stitching and relevant stitching' parameters can be tuned.
+// https://github.com/opencv/opencv/blob/master/samples/cpp/stitching.cpp
 
 int main(int argc, char* argv[])
 {
@@ -94,8 +97,6 @@ int main(int argc, char* argv[])
         
     if (stopFrame == 0)
         stopFrame = min(leftTotalFrames, rightTotalFrames);
-    
-
 
     // Start timer
     auto start = high_resolution_clock::now(); 
@@ -112,6 +113,7 @@ int main(int argc, char* argv[])
     VideoWriter outputVideo; 
 
     // Initialize stitcher pointer, stitcher status and panorama output
+    // source : https://github.com/opencv/opencv/blob/master/modules/stitching/src/stitcher.cpp
     Ptr<Stitcher> stitcher = Stitcher::create(mode);
 
 
@@ -126,21 +128,34 @@ int main(int argc, char* argv[])
     
     if (matcher_type == "affine")
     {
-        cout << CODE_INFO <<  " Matcher is set to : affine, conf:" << match_conf<< endl;
-        matcher = makePtr<AffineBestOf2NearestMatcher>(false, false, match_conf); // second argument is CUDA support
+        cout << CODE_INFO <<  "Matcher is set to : affine  / conf:" << match_conf<< endl;
+        matcher = makePtr<AffineBestOf2NearestMatcher>(false, try_use_gpu, match_conf); // second argument is CUDA support
         stitcher->setFeaturesMatcher(matcher);
 
     }
     else if (matcher_type == "homography")
     {
-        cout << CODE_INFO <<  " Matcher is set to : homography conf:"<< match_conf<< endl;
-        matcher = makePtr<BestOf2NearestMatcher>(false, match_conf); 
+        cout << CODE_INFO <<  "Matcher is set to : homography / conf:"<< match_conf<< endl;
+        matcher = makePtr<BestOf2NearestMatcher>(try_use_gpu, match_conf); 
         stitcher->setFeaturesMatcher(matcher);
     }
     // Initialize warper type. Default is spherical
-    if (warper_type != "")
+
+    cout << CODE_INFO <<  "Warper set to " << warper_type<< endl;
+#ifdef HAVE_OPENCV_CUDAWARPING
+    if (try_use_gpu)
     {
-        cout << CODE_INFO <<  " warp set to " << warper_type<< endl;
+        cout << CODE_INFO <<  "CUDA GPU WARPING ..."<< endl;
+        if (warper_type == "plane")
+            warper = makePtr<cv::PlaneWarperGpu>();
+        else if (warper_type == "cylindrical")
+            warper = makePtr<cv::CylindricalWarperGpu>();
+        else if (warper_type == "spherical")
+            warper = makePtr<cv::SphericalWarperGpu>();
+    }
+    else
+#endif
+    {
         if (warper_type == "plane")
             warper = makePtr<cv::PlaneWarper>();
         else if (warper_type == "affine")
@@ -149,17 +164,30 @@ int main(int argc, char* argv[])
             warper = makePtr<cv::CylindricalWarper>();
         else if (warper_type == "spherical")
             warper = makePtr<cv::SphericalWarper>();
-
-        stitcher->setWarper(warper);
     }
+    
+    stitcher->setWarper(warper);
+    
 
     // Initialize blender. Default is MultibandBlender
-    if (blender_type != "")
+
+    if (blender_type == Blender::NO)
     {
-        cout << CODE_INFO <<  " Blender set to FEATHER "<< endl;
-        blender = makePtr<detail::FeatherBlender>();
-        stitcher->setBlender(blender);
+        blender = makePtr<detail::Blender>();
+        cout << CODE_INFO <<  "Blender set to NO "<< endl; 
     }
+        
+    else if (blender_type == Blender::FEATHER)
+    {
+        blender = makePtr<detail::FeatherBlender>();
+        cout << CODE_INFO <<  "Blender set to FEATHER "<< endl;
+    }
+    else if (blender_type == Blender::MULTI_BAND)
+    {
+        blender = makePtr<detail::MultiBandBlender>(try_use_gpu); // todo check params + check default param(nb of bands) of stitch / composepanorama
+        cout << CODE_INFO << "Blender set to Multiband "<< endl;
+    }
+    stitcher->setBlender(blender);
 
     // Initialize seam_finder_type. Default is gc_color
     if (seam_finder_type != "")
@@ -169,10 +197,29 @@ int main(int argc, char* argv[])
             seam_finder = makePtr<detail::NoSeamFinder>();
         else if (seam_finder_type == "voronoi")
             seam_finder = makePtr<detail::VoronoiSeamFinder>();
+
         else if (seam_finder_type == "gc_color")
+        {
+#ifdef HAVE_OPENCV_CUDALEGACY
+        if (try_use_gpu)
+            cout << CODE_INFO <<  "CUDA GPU SEAM FINDER ..."<< endl;
+            seam_finder = makePtr<detail::GraphCutSeamFinderGpu>(GraphCutSeamFinderBase::COST_COLOR);
+        else
+#endif
             seam_finder = makePtr<detail::GraphCutSeamFinder>(GraphCutSeamFinderBase::COST_COLOR);
+        }
+            
         else if (seam_finder_type == "gc_colorgrad")
+        {
+#ifdef HAVE_OPENCV_CUDALEGACY
+        if (try_use_gpu)
+            cout << CODE_INFO <<  "CUDA GPU SEAM FINDER ..."<< endl;
+            seam_finder = makePtr<detail::GraphCutSeamFinderGpu>(GraphCutSeamFinderBase::COST_COLOR_GRAD);
+        else
+#endif
             seam_finder = makePtr<detail::GraphCutSeamFinder>(GraphCutSeamFinderBase::COST_COLOR_GRAD);
+        }
+            
         else if (seam_finder_type == "dp_color")
             seam_finder = makePtr<detail::DpSeamFinder>(DpSeamFinder::COLOR);
         else if (seam_finder_type == "dp_colorgrad")
@@ -194,15 +241,17 @@ int main(int argc, char* argv[])
         stitcher->setSeamEstimationResol(seam_megapix);
     }
 
-    
+    // Initialize Exposure compensator. Default is GAIN_BLOCKS.
     if (expos_comp_type != ExposureCompensator::GAIN_BLOCKS)
     {
-        cout << CODE_INFO <<  "Exposure compensator set to "<< seam_megapix << endl;
+        cout << CODE_INFO <<  "Exposure compensator set to "<< expos_comp_type << endl;
         stitcher->setExposureCompensator(compensator);
     }
 
+
+
     Stitcher::Status status;
-    Mat pano;
+    Mat pano; // Panorama, stitched image
 
     high_resolution_clock::time_point startTimeFrame;
     high_resolution_clock::time_point stopTimeFrame;
@@ -247,26 +296,34 @@ int main(int argc, char* argv[])
 
         imgs.push_back(rightFrame);
 
+        // Estimate transform between the two cameras on the first frame
         if (readFrame == 0)
         {
             status = stitcher->estimateTransform(imgs);
 
             if (status != Stitcher::OK)
             {
-                // Clear current images vector and estimate the transform in the next frame
+                // Clear current images vector and estimate the transform in the next frame if an error occured
                 cout << CODE_ERROR << "Can't estimate the transform. "<< "Status : " << int(status) << endl;
                 imgs.clear();
                 continue;
             }
             else
             {
+                // 
+                std::vector<detail::CameraParams> cameras_ = stitcher->cameras();
+                cout << CODE_INFO << "Number of cameras : " << cameras_.size() << endl;
                 cout << CODE_INFO << "Transform successfully estimated on frame. Status : " << int(status) << endl;
+                cout << CODE_INFO << "Cameras 0, K : \n " << cameras_[0].K() << endl;
+                cout << CODE_INFO << "Cameras 0, R : \n " << cameras_[0].R << endl;
+                cout << CODE_INFO << "Cameras 1, K : \n " << cameras_[1].K() << endl;
+                cout << CODE_INFO << "Cameras 1, R : \n " << cameras_[1].R << endl; 
             }
             
         }
         
 
-
+        // Stitching the two images into a panorama view
         status = stitcher->composePanorama(imgs, pano);
         if (status != Stitcher::OK)
         {
@@ -286,8 +343,7 @@ int main(int argc, char* argv[])
             if (pano.size().width < 8192 && pano.size().height < 8192)
                 outputVideo.open(result_name,VideoWriter::fourcc('m','p','4','v'),outputFPS, Size(pano.size().width, pano.size().height)); // mp4v codec does not support video with size larger than 8192x8192.
             else
-                //outputVideo.open("result.h264",VideoWriter::fourcc('H','2','6','4'),outputFPS, Size(pano.size().width, pano.size().height));
-                outputVideo.open("result.avi",VideoWriter::fourcc('M','J','P','G'),40, Size(pano.size().width, pano.size().height)); // Not ok with 60 fps
+                outputVideo.open("result.avi",VideoWriter::fourcc('M','J','P','G'),40, Size(pano.size().width, pano.size().height)); // .AVI supports large video but the compression is very small 
 
             cout << CODE_INFO << "VideoWriter initialized (" << outputFPS << ") with the following shape : " <<  pano.size().width << "x" << pano.size().height << endl;
             isInitialized = true;
@@ -297,12 +353,12 @@ int main(int argc, char* argv[])
         // Save frame in video
         outputVideo.write(pano); 
 
-        // End timer
+        // Calculate execution time for ONE single frame
         stopTimeFrame = high_resolution_clock::now(); 
         auto durationTimeFrame = duration_cast<microseconds>(stopTimeFrame - startTimeFrame);
         cout << CODE_INFO << "stitching frame : " << readFrame << "/" << stopFrame<< " completed successfully. " << durationTimeFrame.count() / 1000<< "ms." << endl;
         
-        // Update reading state and clear images vector, frames Matrices
+        // Update reading state and clear images vector, frames Matrix
         readFrame++;
         imgs.clear();
         leftFrame.release();
@@ -310,7 +366,7 @@ int main(int argc, char* argv[])
 
         // Show stitching result on each frame. Quit Stitching by pressing 'q' 
         if (show) {
-            
+            resize(pano, pano,Size(1920, (1920 * pano.size().height) / pano.size().width),0,0, INTER_LINEAR);
             imshow("Frame", pano);
             key = (char) waitKey(1);
 
@@ -339,11 +395,13 @@ int main(int argc, char* argv[])
     }
 
     
-    // Stop time
+    // Calculate total execution time
     auto stop = high_resolution_clock::now(); 
     auto duration = duration_cast<microseconds>(stop - start); 
     cout << CODE_INFO << "Execution time  : " << duration.count() / 1000000 << " s" << endl; 
     cout << CODE_INFO << "Clean and deallocate memory" << endl;
+
+    // Clean memory
     cleanStitcherParams();
     leftCapture.release();
     rightCapture.release();
@@ -367,8 +425,12 @@ void printUsage(char** argv)
          "      Determines configuration of stitcher. The default is 'panorama',\n"
          "      mode suitable for creating photo panoramas. Option 'scans' is suitable\n"
          "      for stitching materials under affine transformation, such as scans.\n"
+         "  --build \n"
+         "      Show the openCV build info'\n"
          "  --output <result_video>\n"
          "      The default is 'result.mp4'.\n"
+         "      Try to use CUDA. The default value is 'no'. All default values\n"
+         "      are for CPU mode.\n"
          "  --work_megapix <float>\n"
          "      Resolution for image registration step. The default is 0.6 Mpx.\n"
          "  --warp (affine|plane|cylindrical|spherical)\n"
@@ -409,11 +471,7 @@ int parseCmdArgs(int argc, char** argv)
             printUsage(argv);
             return EXIT_FAILURE;
         }
-        else if (string(argv[i]) == "--d3")
-        {
-            divide_images = true;
-        }
-        
+
         else if (string(argv[i]) == "--output")
         {
             result_name = argv[i + 1];
@@ -432,19 +490,16 @@ int parseCmdArgs(int argc, char** argv)
             }
             i++;
         }
+        else if (string(argv[i]) == "--build")
+        {
+            cout << getBuildInformation() << endl;
+        }
         
         else if (string(argv[i]) == "--try_use_gpu")
         {
-            if (string(argv[i + 1]) == "no")
-                try_use_gpu = false;
-            else if (string(argv[i + 1]) == "yes")
-                try_use_gpu = true;
-            else
-            {
-                cout << "Bad --try_use_gpu flag value\n";
-                return EXIT_FAILURE;
-            }
-            i++;
+            cout << CODE_INFO << "CUDA GPU support enabled." << endl;
+            try_use_gpu = true;
+            
         }
         else if (string(argv[i]) == "--work_megapix")
         {
@@ -476,7 +531,17 @@ int parseCmdArgs(int argc, char** argv)
         }
         else if (string(argv[i]) == "--blend")
         {
-            blender_type = argv[i+1];
+            if (string(argv[i + 1]) == "no")
+                blender_type = Blender::NO;
+            else if (string(argv[i + 1]) == "feather")
+                blender_type = Blender::FEATHER;
+            else if (string(argv[i + 1]) == "multiband")
+                blender_type = Blender::MULTI_BAND;
+            else
+            {
+                cout << CODE_INFO <<  "Bad blending method\n";
+                return -1;
+            }
             i++;
         }
 
@@ -553,27 +618,7 @@ int parseCmdArgs(int argc, char** argv)
         else
         {
             video_names.push_back(argv[i]);
-            /*
-            Mat img = imread(samples::findFile(argv[i]));
-            if (img.empty())
-            {
-                cout << "Can't read image '" << argv[i] << "'\n";
-                return EXIT_FAILURE;
-            }
 
-            if (divide_images)
-            {
-                Rect rect(0, 0, img.cols / 2, img.rows);
-                imgs.push_back(img(rect).clone());
-                rect.x = img.cols / 3;
-                imgs.push_back(img(rect).clone());
-                rect.x = img.cols / 2;
-                imgs.push_back(img(rect).clone());
-            }
-            else
-                imgs.push_back(img);
-
-            */
         }
     }
     return EXIT_SUCCESS;
@@ -587,6 +632,7 @@ void initStartFrame(int &startFrame,VideoCapture &leftCapture,VideoCapture &righ
     {
         leftCapture >> leftFrame;
         rightCapture >> rightFrame; 
+        cout << CODE_INFO << " Init start frame ...  "<< i << "frames read" << endl;
     }
     cout << CODE_INFO << "Start frame initialized to "<< startFrame << endl;
     startFrame = 0;

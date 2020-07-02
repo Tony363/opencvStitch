@@ -1,7 +1,6 @@
 # ignore dot files/directories
 .*
 !.gitignore
-
 *.autosave
 *.pyc
 *.user
@@ -31,3 +30,12 @@ CMakeSettings.json
 *.jpg
 *.jpeg
 *.png
+
+# Ignore OpenCV CMake, samples, exe
+samples/
+*.cmake
+*.make
+stitching_video/stitching
+stitching_video/CMakeFiles
+*.txt
+*.o
