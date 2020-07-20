@@ -39,3 +39,6 @@ stitching_video/stitching
 stitching_video/CMakeFiles
 *.txt
 *.o
+
+# Ignore stitching_video python venv
+stitching_video/python/stitch-venv/
