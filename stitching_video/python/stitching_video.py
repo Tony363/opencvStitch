@@ -50,7 +50,7 @@ def get_minimum_total_frame(left_capture, right_capture):
     print(CODES.INFO, "Total frames set to {}".format(total_frame))
     return total_frame
 
-def read_vid(stitcher,videos,stop_frame = None,view=False):
+def read_vid(stitcher,videos,stop_frame = None,view=False, resizeWidth = None):
     capL = cv2.VideoCapture('{videoL}'.format(videoL=videos[0]))
     capR = cv2.VideoCapture('{videoR}'.format(videoR=videos[1]))
     
@@ -71,6 +71,11 @@ def read_vid(stitcher,videos,stop_frame = None,view=False):
         Rret,Rframe = capR.read()
         
         if Lret and Rret:
+            # Resize frames
+            if (resizeWidth is not None):
+                Lframe = imutils.resize(Lframe, width = resizeWidth)
+                Rframe = imutils.resize(Rframe, width = resizeWidth)
+
             # Estimate the transform on first frame
             if readFrame == 0 :
 
@@ -144,7 +149,7 @@ def img_write(stitcher,image,output):
 def main(args):
     stitcher = cv2.Stitcher.create(args.mode)
     if args.videos:
-        read_vid(stitcher,args.videos,args.stop_frame,args.view)
+        read_vid(stitcher,args.videos,args.stop_frame,args.view,args.width)
     if args.img and args.output:
         img_write(stitcher,args.img,args.output)
 
@@ -159,6 +164,7 @@ def command_args():
     parser.add_argument('--output', default = 'result.mp4',help = 'Resulting video. The default output name is `result.mp4`.')
     parser.add_argument('--stop_frame',type=int,help='Limit of frames to stitch')
     parser.add_argument('--view',action='store_true',help='view stitch in windows')
+    parser.add_argument('--width',type=int,help='Resize the images before stitching (usually used for time performance or preview)')
     args = parser.parse_args()
     return parser,args
 

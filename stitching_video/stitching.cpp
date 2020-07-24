@@ -5,6 +5,11 @@
 #include "opencv2/stitching/detail/blenders.hpp"
 #include "opencv2/stitching/detail/seam_finders.hpp"
 
+#ifdef HAVE_OPENCV_XFEATURES2D
+#include "opencv2/xfeatures2d.hpp"
+#include "opencv2/xfeatures2d/nonfree.hpp"
+#endif
+
 #include <iostream>
 #include <chrono>
 using namespace std;
@@ -20,7 +25,7 @@ int readFrame = 0;
 int startFrame = 0 ;
 int stopFrame = 0;
 bool isInitialized = false;
-bool show = false;
+bool view_img = false;
 int resizeWidth = 0;
 string result_name = "result_video.mp4";
 char key = 'k'; // Initialize quit key to a random char
@@ -33,6 +38,7 @@ vector<Mat> imgs;
 // GPU/CUDA support
 bool try_use_gpu = false; // OpenCV should be built with CUDa flags enabled. Removed in OpenCV 4.0 ?
 
+
 // Registration working image size
 double work_megapix = 0.6;
 
@@ -40,8 +46,11 @@ double work_megapix = 0.6;
 Ptr<FeaturesMatcher> matcher;
 string matcher_type = "homography";
 
+// Features detector
 // Initialize matcher confidence (ORB features defailt value is 0.3. Decrease this value if image has difficulty to stitch)
+string features_type = "orb";
 float match_conf = 0.3f;
+Ptr<Feature2D> finder;
 
 // Warper creator settings
 Ptr<WarperCreator> warper;
@@ -53,14 +62,15 @@ int blender_type = Blender::MULTI_BAND;
 
 // Seam finder settings
 Ptr<SeamFinder> seam_finder;
-string seam_finder_type = "";
+string seam_finder_type = "gc_color";
 
 // Seam estimation image resolution
 double seam_megapix = 0.1;
 
 // Exposure compensator
 Ptr<ExposureCompensator> compensator;
-int expos_comp_type = ExposureCompensator::GAIN_BLOCKS;
+string expos_comp_type = "gain_blocks";
+int expos_comp = ExposureCompensator::GAIN_BLOCKS;
 
 
 
@@ -74,6 +84,7 @@ void printUsage(char** argv);
 int parseCmdArgs(int argc, char** argv);
 void cleanImgs();
 void cleanStitcherParams();
+void printSticherParams();
 void initStartFrame(int &startFrame,VideoCapture &leftCapture,VideoCapture &rightCapture, Mat &leftFrame, Mat &rightFrame);
 
 
@@ -88,19 +99,21 @@ int main(int argc, char* argv[])
     if (retval) return EXIT_FAILURE;
 
     // Capture left and right videos
+    if (video_names.empty())
+        return EXIT_FAILURE;
     VideoCapture leftCapture(video_names[0]);
     VideoCapture rightCapture(video_names[1]);
     int leftTotalFrames = int(leftCapture.get(CAP_PROP_FRAME_COUNT));
     int rightTotalFrames = int(rightCapture.get(CAP_PROP_FRAME_COUNT));
-    if (leftTotalFrames != rightTotalFrames)
-        cout << CODE_INFO << "Streams Total frames are different. Stopframe will be set to the minimum" << endl;
-        
-    if (stopFrame == 0)
+    // Set the number of frames of the final panorama video
+    if (leftTotalFrames != rightTotalFrames || stopFrame == 0)
+    {
         stopFrame = min(leftTotalFrames, rightTotalFrames);
+        cout << CODE_INFO << "Streams Total frames are different. stopFrame will be set to the minimum "<< stopFrame << endl;
 
-    // Start timer
-    auto start = high_resolution_clock::now(); 
-
+    }
+        
+     
 
     // Initialize camera
     if(!leftCapture.isOpened() || !rightCapture.isOpened())
@@ -119,29 +132,40 @@ int main(int argc, char* argv[])
 
     // Initialize work_megapix. Default is 0.6 Mpx.
     if (work_megapix != 0.6)
-    {
-        cout << CODE_INFO <<  "Registration resolution set to "<< work_megapix << endl;
         stitcher->setRegistrationResol(work_megapix);
+    
+    // Initialize features detector. Default is ORB.
+    if (features_type == "orb")
+        finder = ORB::create();
+    else if (features_type == "akaze")
+        finder = AKAZE::create();
+#ifdef HAVE_OPENCV_XFEATURES2D
+    else if (features_type == "surf")
+        finder = xfeatures2d::SURF::create();
+#endif
+    else if (features_type == "sift")
+        finder = SIFT::create();
+    else
+    {
+        cout << "Unknown 2D features type: '" << features_type << "'.\n";
+        return -1;
     }
+    stitcher->setFeaturesFinder(finder);
 
     // Initialize matcher type. Default is homography.
-    
     if (matcher_type == "affine")
     {
-        cout << CODE_INFO <<  "Matcher is set to : affine  / conf:" << match_conf<< endl;
+        
         matcher = makePtr<AffineBestOf2NearestMatcher>(false, try_use_gpu, match_conf); // second argument is CUDA support
         stitcher->setFeaturesMatcher(matcher);
 
     }
     else if (matcher_type == "homography")
     {
-        cout << CODE_INFO <<  "Matcher is set to : homography / conf:"<< match_conf<< endl;
         matcher = makePtr<BestOf2NearestMatcher>(try_use_gpu, match_conf); 
         stitcher->setFeaturesMatcher(matcher);
     }
     // Initialize warper type. Default is spherical
-
-    cout << CODE_INFO <<  "Warper set to " << warper_type<< endl;
 #ifdef HAVE_OPENCV_CUDAWARPING
     if (try_use_gpu)
     {
@@ -165,101 +189,87 @@ int main(int argc, char* argv[])
         else if (warper_type == "spherical")
             warper = makePtr<cv::SphericalWarper>();
     }
-    
     stitcher->setWarper(warper);
     
 
     // Initialize blender. Default is MultibandBlender
 
     if (blender_type == Blender::NO)
-    {
         blender = makePtr<detail::Blender>();
-        cout << CODE_INFO <<  "Blender set to NO "<< endl; 
-    }
-        
     else if (blender_type == Blender::FEATHER)
-    {
         blender = makePtr<detail::FeatherBlender>();
-        cout << CODE_INFO <<  "Blender set to FEATHER "<< endl;
-    }
     else if (blender_type == Blender::MULTI_BAND)
-    {
         blender = makePtr<detail::MultiBandBlender>(try_use_gpu); // todo check params + check default param(nb of bands) of stitch / composepanorama
-        cout << CODE_INFO << "Blender set to Multiband "<< endl;
-    }
     stitcher->setBlender(blender);
 
     // Initialize seam_finder_type. Default is gc_color
-    if (seam_finder_type != "")
-    {   
-        
-        if (seam_finder_type == "no")
-            seam_finder = makePtr<detail::NoSeamFinder>();
-        else if (seam_finder_type == "voronoi")
-            seam_finder = makePtr<detail::VoronoiSeamFinder>();
+    if (seam_finder_type == "no")
+        seam_finder = makePtr<detail::NoSeamFinder>();
+    else if (seam_finder_type == "voronoi")
+        seam_finder = makePtr<detail::VoronoiSeamFinder>();
 
-        else if (seam_finder_type == "gc_color")
-        {
+    else if (seam_finder_type == "gc_color")
+    {
 #ifdef HAVE_OPENCV_CUDALEGACY
-        if (try_use_gpu)
-            cout << CODE_INFO <<  "CUDA GPU SEAM FINDER ..."<< endl;
-            seam_finder = makePtr<detail::GraphCutSeamFinderGpu>(GraphCutSeamFinderBase::COST_COLOR);
-        else
+    if (try_use_gpu)
+        cout << CODE_INFO <<  "CUDA GPU SEAM FINDER ..."<< endl;
+        seam_finder = makePtr<detail::GraphCutSeamFinderGpu>(GraphCutSeamFinderBase::COST_COLOR);
+    else
 #endif
-            seam_finder = makePtr<detail::GraphCutSeamFinder>(GraphCutSeamFinderBase::COST_COLOR);
-        }
-            
-        else if (seam_finder_type == "gc_colorgrad")
-        {
-#ifdef HAVE_OPENCV_CUDALEGACY
-        if (try_use_gpu)
-            cout << CODE_INFO <<  "CUDA GPU SEAM FINDER ..."<< endl;
-            seam_finder = makePtr<detail::GraphCutSeamFinderGpu>(GraphCutSeamFinderBase::COST_COLOR_GRAD);
-        else
-#endif
-            seam_finder = makePtr<detail::GraphCutSeamFinder>(GraphCutSeamFinderBase::COST_COLOR_GRAD);
-        }
-            
-        else if (seam_finder_type == "dp_color")
-            seam_finder = makePtr<detail::DpSeamFinder>(DpSeamFinder::COLOR);
-        else if (seam_finder_type == "dp_colorgrad")
-            seam_finder = makePtr<detail::DpSeamFinder>(DpSeamFinder::COLOR_GRAD);
-
-        if (!seam_finder)
-        {
-            cout << CODE_INFO  <<"Can't create the following seam finder '" << seam_finder_type << "'\n";
-            return 1;
-        }
-        cout << CODE_INFO <<  "Seam Finder set to "<< seam_finder_type << endl;
-        stitcher->setSeamFinder(seam_finder);
+        seam_finder = makePtr<detail::GraphCutSeamFinder>(GraphCutSeamFinderBase::COST_COLOR);
     }
+        
+    else if (seam_finder_type == "gc_colorgrad")
+    {
+#ifdef HAVE_OPENCV_CUDALEGACY
+    if (try_use_gpu)
+        cout << CODE_INFO <<  "CUDA GPU SEAM FINDER ..."<< endl;
+        seam_finder = makePtr<detail::GraphCutSeamFinderGpu>(GraphCutSeamFinderBase::COST_COLOR_GRAD);
+    else
+#endif
+        seam_finder = makePtr<detail::GraphCutSeamFinder>(GraphCutSeamFinderBase::COST_COLOR_GRAD);
+    }
+        
+    else if (seam_finder_type == "dp_color")
+        seam_finder = makePtr<detail::DpSeamFinder>(DpSeamFinder::COLOR);
+    else if (seam_finder_type == "dp_colorgrad")
+        seam_finder = makePtr<detail::DpSeamFinder>(DpSeamFinder::COLOR_GRAD);
+
+    if (!seam_finder)
+    {
+        cout << CODE_INFO  <<"Can't create the following seam finder '" << seam_finder_type << "'\n";
+        return 1;
+    }
+    stitcher->setSeamFinder(seam_finder);
+    
 
     // Initialize seam_megapix. Default is 0.1 Mpx.
     if (seam_megapix != 0.1)
-    {
-        cout << CODE_INFO <<  "Seam estimation resolution set to "<< seam_megapix << endl;
         stitcher->setSeamEstimationResol(seam_megapix);
-    }
+    
 
     // Initialize Exposure compensator. Default is GAIN_BLOCKS.
-    if (expos_comp_type != ExposureCompensator::GAIN_BLOCKS)
+    if (expos_comp != ExposureCompensator::GAIN_BLOCKS)
     {
-        cout << CODE_INFO <<  "Exposure compensator set to "<< expos_comp_type << endl;
+        cout << CODE_INFO <<  "Exposure compensator set to "<< expos_comp << endl;
         stitcher->setExposureCompensator(compensator);
     }
 
+    // Display sticher parameters
+    printSticherParams();
 
 
-    Stitcher::Status status;
+    Stitcher::Status status; // stitching status
     Mat pano; // Panorama, stitched image
 
-    high_resolution_clock::time_point startTimeFrame;
+    // Initialize timers
+    high_resolution_clock::time_point start = high_resolution_clock::now(); // Total execution time
+    high_resolution_clock::time_point startTimeFrame; // one single frame processing time
     high_resolution_clock::time_point stopTimeFrame;
 
     // Loop through all the video stream
     while ( leftCapture.isOpened() && rightCapture.isOpened())
     {
-        // Frame processing starting time
         // Start timer
         startTimeFrame = high_resolution_clock::now(); 
 
@@ -299,6 +309,7 @@ int main(int argc, char* argv[])
         // Estimate transform between the two cameras on the first frame
         if (readFrame == 0)
         {
+            cout << CODE_INFO<< "Estimating the cameras' transform ..." << endl;
             status = stitcher->estimateTransform(imgs);
 
             if (status != Stitcher::OK)
@@ -358,29 +369,38 @@ int main(int argc, char* argv[])
         auto durationTimeFrame = duration_cast<microseconds>(stopTimeFrame - startTimeFrame);
         cout << CODE_INFO << "stitching frame : " << readFrame << "/" << stopFrame<< " completed successfully. " << durationTimeFrame.count() / 1000<< "ms." << endl;
         
+        
+
+        // Show stitching result on each frame. Quit Stitching by pressing 'q' 
+        if (view_img) {
+            // Show concatenated inputs
+            Mat concatInputs;
+            hconcat(leftFrame, rightFrame, concatInputs);
+            resize(concatInputs, concatInputs, Size(1920, (1920 * concatInputs.size().height) / concatInputs.size().width),0,0,INTER_LINEAR);
+            imshow("Concatenated Inputs", concatInputs);
+
+            // Show stitched panorama
+            resize(pano, pano,Size(1920, (1920 * pano.size().height) / pano.size().width),0,0, INTER_LINEAR);
+            imshow("Stitched panorama", pano);
+
+            key = (char) waitKey(1);
+            if (key == 'q')
+            {
+                cout << CODE_INFO << "Successfully quit the program\n";
+                cout << CODE_INFO << "Clean frame object" << endl;
+                break;
+            }
+        }
+
+
+
         // Update reading state and clear images vector, frames Matrix
         readFrame++;
         imgs.clear();
         leftFrame.release();
         rightFrame.release();
 
-        // Show stitching result on each frame. Quit Stitching by pressing 'q' 
-        if (show) {
-            resize(pano, pano,Size(1920, (1920 * pano.size().height) / pano.size().width),0,0, INTER_LINEAR);
-            imshow("Frame", pano);
-            key = (char) waitKey(1);
-
-            if (key == 'q')
-            {
-                cout << CODE_INFO << "Successfully quit the program\n";
-                cout << CODE_INFO << "Clean frame object" << endl;
-                leftFrame.release();
-                rightFrame.release();
-                break;
-            }
-        }
-
-
+        // Quit the reading if the stop frame is reached
         if (readFrame == stopFrame)
         {
            
@@ -431,6 +451,9 @@ void printUsage(char** argv)
          "      The default is 'result.mp4'.\n"
          "      Try to use CUDA. The default value is 'no'. All default values\n"
          "      are for CPU mode.\n"
+         "  --features (surf|orb|sift|akaze)\n"
+         "      Type of features used for images matching.\n"
+         "      The default is surf if available, orb otherwise.\n"
          "  --work_megapix <float>\n"
          "      Resolution for image registration step. The default is 0.6 Mpx.\n"
          "  --warp (affine|plane|cylindrical|spherical)\n"
@@ -447,9 +470,11 @@ void printUsage(char** argv)
          "      Resolution for seam estimation step. The default is 0.1 Mpx.\n"
          "  --expos_comp (no|gain|gain_blocks|channels|channels_blocks)\n"
          "      Exposure compensation method. The default is 'gain_blocks'.\n"
-         "  --show\n"
+         "  --view-img \n"
          "      Show each frame stitching preview.\n"   
-         "  --stop <int>\n"
+         "  --width <int>\n"
+         "      Perfom stitching on a resized image (usually smaller for time performance and preview ).\n" 
+         "  --stop <int>\n" 
          "      Stop the stitching at the given frame number.\n\n"
          "Example usage :\n" << argv[0] << " left_video.mp4 right_video.mp4 --output result.mp4 --matcher affine\n";
 }
@@ -497,9 +522,18 @@ int parseCmdArgs(int argc, char** argv)
         
         else if (string(argv[i]) == "--try_use_gpu")
         {
-            cout << CODE_INFO << "CUDA GPU support enabled." << endl;
+            
             try_use_gpu = true;
             
+        }
+        else if (string(argv[i]) == "--features")
+        {
+            features_type = argv[i + 1];
+            if (string(features_type) == "orb")
+                match_conf = 0.3f;
+            else
+                match_conf = 0.65f; // Default value for other features detector (SURF, SIFT ...)
+            i++;
         }
         else if (string(argv[i]) == "--work_megapix")
         {
@@ -562,25 +596,25 @@ int parseCmdArgs(int argc, char** argv)
         }
         else if (string(argv[i]) == "--expos_comp")
         {
+            expos_comp_type = string(argv[i + 1]);
 
             if (string(argv[i + 1]) == "no")
-                expos_comp_type = ExposureCompensator::NO;
+                expos_comp = ExposureCompensator::NO;
             else if (string(argv[i + 1]) == "gain")
-                expos_comp_type = ExposureCompensator::GAIN;
+                expos_comp = ExposureCompensator::GAIN;
             else if (string(argv[i + 1]) == "gain_blocks")
-                expos_comp_type = ExposureCompensator::GAIN_BLOCKS;
+                expos_comp = ExposureCompensator::GAIN_BLOCKS;
             else if (string(argv[i + 1]) == "channels")
-                expos_comp_type = ExposureCompensator::CHANNELS;
+                expos_comp = ExposureCompensator::CHANNELS;
             else if (string(argv[i + 1]) == "channels_blocks")
-                expos_comp_type = ExposureCompensator::CHANNELS_BLOCKS;
+                expos_comp = ExposureCompensator::CHANNELS_BLOCKS;
             else
             {
                 cout << "Bad exposure compensation method\n";
                 return -1;
             }
 
-            cout << CODE_INFO <<  "expos_comp set to "<< string(argv[i+1]) << endl;
-            compensator = ExposureCompensator::createDefault(expos_comp_type);
+            compensator = ExposureCompensator::createDefault(expos_comp);
             i++;
         }
         else if (string(argv[i]) == "--stop")
@@ -602,9 +636,9 @@ int parseCmdArgs(int argc, char** argv)
             i++;
         }
 
-        else if (string(argv[i]) == "--show")
+        else if (string(argv[i]) == "--view-img")
         {
-            show = true;
+            view_img = true;
         }
 
         else if (string(argv[i]) == "--width")
@@ -655,4 +689,26 @@ void cleanStitcherParams()
     seam_finder.release();
     compensator.release();
     
+}
+
+void printSticherParams()
+{
+    cout << "  ------ Sticher parameters -----\n" << endl;
+    cout << CODE_INFO << "CUDA GPU support set to " << try_use_gpu << endl;
+    cout << CODE_INFO <<  "Registration resolution set to "<< work_megapix << endl;
+    cout << CODE_INFO <<  "Features matcher set to  "<< features_type << endl;
+    cout << CODE_INFO <<  "Matcher is set to "<< matcher_type << ", match_conf set to " << match_conf<< endl;
+    cout << CODE_INFO <<  "Warper set to " << warper_type<< endl;
+    cout << CODE_INFO <<  "Seam finder set to "<< seam_finder_type << endl;
+    cout << CODE_INFO <<  "Seam estimation resolution set to "<< seam_megapix << endl;
+    cout << CODE_INFO <<  "expos_comp_type set to "<< expos_comp_type << endl;
+    if (blender_type == Blender::NO)
+        cout << CODE_INFO <<  "Blender set to NO "<< endl; 
+    else if (blender_type == Blender::FEATHER)
+        cout << CODE_INFO <<  "Blender set to FEATHER "<< endl;
+    else if (blender_type == Blender::MULTI_BAND)
+        cout << CODE_INFO << "Blender set to Multiband "<< endl;
+    cout << "  ---------------------------------\n" << endl;
+    
+
 }
