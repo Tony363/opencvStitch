@@ -4,6 +4,7 @@ import time
 import sys
 import imutils
 
+
 class CSI_Camera:
 
     def __init__ (self) :
@@ -18,25 +19,40 @@ class CSI_Camera:
         self.read_lock = threading.Lock()
         self.running = False
 
-    # Open CSI-cameras with gstreamer
-    """
-    def open(self, gstreamer_pipeline_string):
-        try:
-            self.video_capture = cv2.VideoCapture(
-                gstreamer_pipeline_string, cv2.CAP_GSTREAMER
-            )
-            
-        except RuntimeError:
-            self.video_capture = None
-            print("Unable to open camera")
-            print("Pipeline: " + gstreamer_pipeline_string)
-            return
-        # Grab the first frame to start the video capturing
-        self.grabbed, self.frame = self.video_capture.read()
-    """
+    # Open CSI-cameras with GStreamer
+    # for mipi, filename is the gstreamer pipeline string returned by gstreamer.py
+    # for usb, filename is the camera device ID (0 or 1)
+    def open(self, interface, filename):
+        if interface  == "mipi":
+            try:
+                self.video_capture = cv2.VideoCapture(
+                    filename, cv2.CAP_GSTREAMER
+                ) # Use API CAP_GSTREAMER
+                print("{} Camera {} successfully opened".format(interface,filename))
 
+            except RuntimeError:
+                self.video_capture = None
+                print("Unable to open camera")
+                print("Pipeline: " + filename)
+                return
+            # Grab the first frame to start the video capturing
+            self.grabbed, self.frame = self.video_capture.read()
+
+        elif interface == "usb" or interface == "none":
+            try:
+                self.video_capture = cv2.VideoCapture(filename) 
+                print("{} Camera {} successfully opened".format(interface,filename))
+            except RuntimeError:
+                self.video_capture = None
+                print("Unable to open camera")
+                print("Pipeline: " + filename)
+                return
+            # Grab the first frame to start the video capturing
+            self.grabbed, self.frame = self.video_capture.read()
+            
+    """
     # Open videos file using opencv VideoCapture
-    def open(self, video_name):
+    def openFile(self, interface, video_name):
         try:
             self.video_capture = cv2.VideoCapture(video_name)
             
@@ -46,7 +62,7 @@ class CSI_Camera:
             return
         # Grab the first frame to start the video capturing
         self.grabbed, self.frame = self.video_capture.read()
-
+    """
 
     def start(self):
         if self.running:
@@ -112,8 +128,8 @@ class Panorama:
         # The thread where the video capture runs
         self.read_thread = None
         self.read_lock = threading.Lock()
-    
         self.running = False
+        self.save_thread = None
 
     def start(self):
         if self.running:

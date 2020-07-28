@@ -17,7 +17,9 @@ import imutils
 import argparse
 import sys
 import time
+
 from camera import CSI_Camera,Panorama
+from gstreamer import gstreamer_pipeline
 
 modes = (cv2.Stitcher_PANORAMA, cv2.Stitcher_SCANS)
 out_path = "result.mp4"
@@ -97,13 +99,41 @@ def read_vid_thread(stitcher,videos,stop_frame = None,view=False):
     cv2.destroyAllWindows()
     return None
 
-def read_vid(stitcher,videos,stop_frame = None,view=False):
+def read_vid(stitcher,interface,videos,stop_frame = None,view=False):
     left_camera = CSI_Camera()
-    left_camera.open(videos[0])
-    left_camera.start()
-    
     right_camera = CSI_Camera()
-    right_camera.open(videos[1])
+    # Use offline videos file
+    if interface=="none" and videos is not None:
+        left_camera.open(interface,videos[0])
+        right_camera.open(interface,videos[1])
+
+    # Use the MIPI interface cameras
+    elif interface=="mipi":
+        
+        left_camera.open(interface,gstreamer_pipeline(
+            sensor_id=0,
+            sensor_mode=3,
+            flip_method=0,
+            display_height=540,
+            display_width=960,
+        ))
+        right_camera.open(interface,gstreamer_pipeline(
+            sensor_id=1,
+            sensor_mode=3,
+            flip_method=0,
+            display_height=540,
+            display_width=960,
+        ))
+     # Use the USB interface cameras
+    elif interface=="usb":
+        left_camera.open(interface,0)
+        right_camera.open(interface,1)
+    else:
+        print(CODES.ERROR,"Interface does not exist.")
+        SystemExit(0)
+    
+    # Start cameras frame reading thread
+    left_camera.start()
     right_camera.start()
 
 
@@ -159,8 +189,11 @@ def read_vid(stitcher,videos,stop_frame = None,view=False):
                 if readFrame == stop_frame:
                     print(CODES.INFO,"Stitching stop frame reached.")
                     break
-
+                
+                compose_time = timer()
                 status, pano = stitcher.composePanorama([left_frame,right_frame],pano)
+                print(CODES.INFO, "compose_time : {:.3f} s".format(timer(compose_time)))
+
                 if not status_check(status):
                     print(CODES.ERROR, "composePanorama failed.")
                 
@@ -212,11 +245,10 @@ def img_write(stitcher,image,output):
 
 def main(args):
     stitcher = cv2.Stitcher.create(args.mode)
-    if args.videos:
+    if args.interface:
         #read_vid_thread(stitcher,args.videos,args.stop_frame,args.view)
-        read_vid(stitcher,args.videos,args.stop_frame,args.view)
-    if args.img and args.output:
-        img_write(stitcher,args.img,args.output)
+        read_vid(stitcher,args.interface,args.videos,args.stop_frame,args.view)
+    
 
 def command_args():
     parser = argparse.ArgumentParser(prog='stitching.py', description='Stitching sample.')
@@ -224,11 +256,13 @@ def command_args():
     help = 'Determines configuration of stitcher. The default is `PANORAMA` (%d), '
             'mode suitable for creating photo panoramas. Option `SCANS` (%d) is suitable '
             'for stitching materials under affine transformation, such as scans.' % modes)
-    parser.add_argument('--videos',nargs='+',help='input videos')
+    parser.add_argument('--interface', default='usb',help='define the cameras interface (usb|mipi|none)')
+    parser.add_argument('--videos',nargs='+',help='input videos. To use videos file, set \'interface\' to none')
     parser.add_argument('--img', nargs='+', help = 'input images')
     parser.add_argument('--output', default = 'result.mp4',help = 'Resulting video. The default output name is `result.mp4`.')
     parser.add_argument('--stop_frame',type=int,help='Limit of frames to stitch')
     parser.add_argument('--view',action='store_true',help='view stitch in windows')
+
     args = parser.parse_args()
     return parser,args
 
