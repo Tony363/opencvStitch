@@ -177,6 +177,8 @@ def read_args():
             'mode suitable for creating photo panoramas. Option `SCANS` (%d) is suitable '
             'for stitching materials under affine transformation, such as scans.' % modes)
     parser.add_argument('--interface', default='usb',help='define the cameras interface (usb|mipi|none)')
+    parser.add_argument('--device0', type=int, default=0,help='Left camera device id')
+    parser.add_argument('--device1', type=int, default=1,help='Right camera device id')
     parser.add_argument('--capture_width', type=int, help='Cameras capture width')
     parser.add_argument('--capture_height', type=int, help='Cameras capture height')
     parser.add_argument('--videos',nargs='+',help='input videos. To use videos file, set \'interface\' to none')
@@ -190,6 +192,7 @@ def read_args():
 
 
 # check to see if this is the main thread of execution
+# ex usage : python3 stitch_streaming.py --interface none --videos ../inputs/left.mp4 ../inputs/right.mp4 --capture_width 640 --capture_height 480
 if __name__ == '__main__':
     # Read args
     parser, args = read_args()

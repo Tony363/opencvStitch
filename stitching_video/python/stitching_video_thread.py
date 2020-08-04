@@ -71,7 +71,7 @@ def get_minimum_total_frame(left_capture, right_capture):
 # This read_vid function will display the left/right frames, the result panorama in the same thread
 # BUT the stitching is done separetely in another thread
 # Display 10 FPS 
-def read_vid_thread(stitcher,interface,capture_width, capture_height,videos,stop_frame = None,view=False):
+def read_vid_thread(stitcher,interface,device0,device1,capture_width, capture_height,videos,stop_frame = None,view=False):
     global left_camera, right_camera, left_image, right_image, final_camera, pano
     left_camera = CSI_Camera()
     right_camera = CSI_Camera()
@@ -100,8 +100,8 @@ def read_vid_thread(stitcher,interface,capture_width, capture_height,videos,stop
         ),capture_width, capture_height)
      # Use the USB interface cameras
     elif interface=="usb":
-        left_camera.open(interface,0,capture_width, capture_height)
-        right_camera.open(interface,1,capture_width, capture_height)
+        left_camera.open(interface,device0,capture_width, capture_height)
+        right_camera.open(interface,device1,capture_width, capture_height)
     else:
         print(CODES.ERROR,"Interface does not exist.")
         SystemExit(0)
@@ -305,7 +305,7 @@ def main(args):
     stitcher = cv2.Stitcher.create(args.mode)
     if args.interface:
         #read_vid_thread(stitcher,args.interface,args.videos,args.stop_frame,args.view)
-        read_vid_thread(stitcher,args.interface,args.capture_width,args.capture_height,args.videos,args.stop_frame,args.view)
+        read_vid_thread(stitcher,args.interface,args.device0,args.device1,args.capture_width,args.capture_height,args.videos,args.stop_frame,args.view)
     
 
 # Python 3 
@@ -317,6 +317,8 @@ def command_args():
             'mode suitable for creating photo panoramas. Option `SCANS` (%d) is suitable '
             'for stitching materials under affine transformation, such as scans.' % modes)
     parser.add_argument('--interface', default='usb',help='define the cameras interface (usb|mipi|none)')
+    parser.add_argument('--device0', type=int, default=0,help='Left camera device id')
+    parser.add_argument('--device1', type=int, default=1,help='Right camera device id')
     parser.add_argument('--capture_width', type=int, help='Cameras capture width')
     parser.add_argument('--capture_height', type=int, help='Cameras capture height')
     parser.add_argument('--videos',nargs='+',help='input videos. To use videos file, set \'interface\' to none')
