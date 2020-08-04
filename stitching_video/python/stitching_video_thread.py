@@ -51,13 +51,46 @@ def get_minimum_total_frame(left_capture, right_capture):
     print(CODES.INFO, "Total frames set to {}".format(total_frame))
     return total_frame
 
-def read_vid_thread(stitcher,videos,stop_frame = None,view=False):
+
+# This read_vid function will display the left/right frames, the result panorama in the same thread
+# BUT the stitching is done separetely in another thread
+# Display 10 FPS 
+def read_vid_thread(stitcher,interface,capture_width, capture_height,videos,stop_frame = None,view=False):
     left_camera = CSI_Camera()
-    left_camera.open(videos[0])
-    left_camera.start()
-    
     right_camera = CSI_Camera()
-    right_camera.open(videos[1])
+
+    # Use offline videos file
+    if interface=="none" and videos is not None:
+        left_camera.open(interface,videos[0],capture_width, capture_height)
+        right_camera.open(interface,videos[1],capture_width, capture_height)
+
+    # Use the MIPI interface cameras
+    elif interface=="mipi":
+        
+        left_camera.open(interface,gstreamer_pipeline(
+            sensor_id=0,
+            sensor_mode=3,
+            flip_method=0,
+            display_height=540,
+            display_width=960,
+        ),capture_width, capture_height)
+        right_camera.open(interface,gstreamer_pipeline(
+            sensor_id=1,
+            sensor_mode=3,
+            flip_method=0,
+            display_height=540,
+            display_width=960,
+        ),capture_width, capture_height)
+     # Use the USB interface cameras
+    elif interface=="usb":
+        left_camera.open(interface,0,capture_width, capture_height)
+        right_camera.open(interface,1,capture_width, capture_height)
+    else:
+        print(CODES.ERROR,"Interface does not exist.")
+        SystemExit(0)
+
+
+    left_camera.start()
     right_camera.start()
 
     # Initialize panorama class
@@ -82,7 +115,7 @@ def read_vid_thread(stitcher,videos,stop_frame = None,view=False):
         # Show the panorama stream (stitched video streams)
         _, pano = final_camera.read()
         if pano is not None:
-            pano = imutils.resize(final_camera.pano, width=1980)
+            pano = imutils.resize(pano, width=1980)
             cv2.imshow("Stitched view", pano)
 
         # This also acts as
@@ -99,13 +132,16 @@ def read_vid_thread(stitcher,videos,stop_frame = None,view=False):
     cv2.destroyAllWindows()
     return None
 
-def read_vid(stitcher,interface,videos,stop_frame = None,view=False):
+
+# This read_vid function will display the left/right frames, stitch and display the result in the same thread
+# Display is 2FPS (500ms)
+def read_vid(stitcher,interface,capture_width,capture_height,videos,stop_frame = None,view=False):
     left_camera = CSI_Camera()
     right_camera = CSI_Camera()
     # Use offline videos file
     if interface=="none" and videos is not None:
-        left_camera.open(interface,videos[0])
-        right_camera.open(interface,videos[1])
+        left_camera.open(interface,videos[0],capture_width, capture_height)
+        right_camera.open(interface,videos[1],capture_width, capture_height)
 
     # Use the MIPI interface cameras
     elif interface=="mipi":
@@ -116,18 +152,18 @@ def read_vid(stitcher,interface,videos,stop_frame = None,view=False):
             flip_method=0,
             display_height=540,
             display_width=960,
-        ))
+        ),capture_width, capture_height)
         right_camera.open(interface,gstreamer_pipeline(
             sensor_id=1,
             sensor_mode=3,
             flip_method=0,
             display_height=540,
             display_width=960,
-        ))
+        ),capture_width, capture_height)
      # Use the USB interface cameras
     elif interface=="usb":
-        left_camera.open(interface,0)
-        right_camera.open(interface,1)
+        left_camera.open(interface,0,capture_width, capture_height)
+        right_camera.open(interface,1,capture_width, capture_height)
     else:
         print(CODES.ERROR,"Interface does not exist.")
         SystemExit(0)
@@ -246,8 +282,8 @@ def img_write(stitcher,image,output):
 def main(args):
     stitcher = cv2.Stitcher.create(args.mode)
     if args.interface:
-        #read_vid_thread(stitcher,args.videos,args.stop_frame,args.view)
-        read_vid(stitcher,args.interface,args.videos,args.stop_frame,args.view)
+        #read_vid_thread(stitcher,args.interface,args.videos,args.stop_frame,args.view)
+        read_vid_thread(stitcher,args.interface,args.capture_width,args.capture_height,args.videos,args.stop_frame,args.view)
     
 
 def command_args():
@@ -257,12 +293,13 @@ def command_args():
             'mode suitable for creating photo panoramas. Option `SCANS` (%d) is suitable '
             'for stitching materials under affine transformation, such as scans.' % modes)
     parser.add_argument('--interface', default='usb',help='define the cameras interface (usb|mipi|none)')
+    parser.add_argument('--capture_width', type=int, help='Cameras capture width')
+    parser.add_argument('--capture_height', type=int, help='Cameras capture height')
     parser.add_argument('--videos',nargs='+',help='input videos. To use videos file, set \'interface\' to none')
     parser.add_argument('--img', nargs='+', help = 'input images')
     parser.add_argument('--output', default = 'result.mp4',help = 'Resulting video. The default output name is `result.mp4`.')
     parser.add_argument('--stop_frame',type=int,help='Limit of frames to stitch')
     parser.add_argument('--view',action='store_true',help='view stitch in windows')
-
     args = parser.parse_args()
     return parser,args
 

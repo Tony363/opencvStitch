@@ -3,6 +3,11 @@ import threading
 import time
 import sys
 import imutils
+import numpy as np
+
+class CODES:
+    INFO = "[INFO]"
+    ERROR = "[ERROR]"
 
 
 class CSI_Camera:
@@ -22,7 +27,7 @@ class CSI_Camera:
     # Open CSI-cameras with GStreamer
     # for mipi, filename is the gstreamer pipeline string returned by gstreamer.py
     # for usb, filename is the camera device ID (0 or 1)
-    def open(self, interface, filename):
+    def open(self, interface, filename, capture_width, capture_height):
         if interface  == "mipi":
             try:
                 self.video_capture = cv2.VideoCapture(
@@ -40,8 +45,20 @@ class CSI_Camera:
 
         elif interface == "usb" or interface == "none":
             try:
-                self.video_capture = cv2.VideoCapture(filename) 
+                if interface == "none":
+                    self.video_capture = cv2.VideoCapture(filename) 
+                elif interface == "usb":
+                    self.video_capture = cv2.VideoCapture(filename,cv2.CAP_V4L) 
                 print("{} Camera {} successfully opened".format(interface,filename))
+                #https://docs.opencv.org/3.4/d4/d15/group__videoio__flags__base.html#gaeb8dd9c89c10a5c63c139bf7c4f5704d
+                if (capture_width is not None and capture_height is not None):
+                    self.video_capture.set(cv2.CAP_PROP_FRAME_WIDTH, int(capture_width)) # Set width of the frame in the video frame
+                    self.video_capture.set(cv2.CAP_PROP_FRAME_HEIGHT, int(capture_height))
+                    print("Capture width and height set to : {}x{}".format(capture_width,capture_height))
+                # Video decoder (Speed performance)
+                self.video_capture.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc('M', 'J', 'P', 'G'))
+                print("Video decoder set to : MJPG")
+
             except RuntimeError:
                 self.video_capture = None
                 print("Unable to open camera")
@@ -118,7 +135,7 @@ class Panorama:
         # Initialize Stitcher class
         self.stitcher = cv2.Stitcher.create(cv2.Stitcher_PANORAMA)
         self.imgs = []
-        self.stiched_frames = 0
+        self.stitched_frames = 0
 
         # Initialize CSI cameras
         self.left_camera = left_camera
@@ -154,20 +171,39 @@ class Panorama:
                         _, left_image = self.left_camera.read()
                         _, right_image = self.right_camera.read()
 
-                    stitch_start_time = time.time()
                     
-                    status,pano = self.stitcher.stitch([left_image, right_image])
+                        stitch_start_time = time.time()
+                        # NB : cv2.UMat array is faster than np array
+                        pano = cv2.UMat(np.asarray([]))
+                        if self.stitched_frames == 0:
+                            status = self.stitcher.estimateTransform([left_image,right_image])
+                            if status_check(status):
+                                print(CODES.INFO, "Transform successfully estimated")
+                        
+                            status,pano = self.stitcher.composePanorama([left_image,right_image],pano)
+                            if not status_check(status):
+                                continue
 
-                    if status != cv2.Stitcher_OK:
-                        print("Can't stitch images, error code = %d" % status)
-                        #sys.exit(-1) 
+                            # Initialize the video writer object
+                            capL = self.left_camera.video_capture
+                            capR = self.right_camera.video_capture
+                            h,w = cv2.UMat.get(pano).shape[:2] # Convert UMat to numpy array
+                            fps = min(capL.get(cv2.CAP_PROP_FPS),capR.get(cv2.CAP_PROP_FPS))
+                            fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+                            out = cv2.VideoWriter("result.mp4",fourcc,fps,(w,h))
+                            print(CODES.INFO, "Video Writer initialized with {:.1f} fps and shape {}x{}".format(fps,w,h))
 
-                    print("Stitching completed successfully ({}). Done in {:.3f}s".format(self.stiched_frames,time.time() - stitch_start_time))
-
-                    with self.read_lock:
-                        self.status=status
-                        self.pano=pano
-                        self.stiched_frames += 1
+                        else:
+                            status, pano = self.stitcher.composePanorama([left_image,right_image],pano)
+                            if not status_check(status):
+                                print(CODES.ERROR, "composePanorama failed.") 
+                                continue
+                            
+                        print("Stitching completed successfully ({}). Done in {:.3f}s".format(self.stitched_frames,time.time() - stitch_start_time))
+                        with self.read_lock:
+                            self.status=status
+                            self.pano=pano
+                            self.stitched_frames += 1
 
                 except RuntimeError:
                     print("Could not stitch image from CSI cameras")
@@ -177,7 +213,7 @@ class Panorama:
     def read(self):
         if self.pano is not None:
             with self.read_lock:
-                pano = self.pano.copy()
+                pano = cv2.UMat.get(self.pano).copy()
                 status = self.status
             return status, pano 
         else:
@@ -187,3 +223,11 @@ class Panorama:
     def stop(self):
         self.running=False
         self.read_thread.join()
+
+
+
+def status_check(status):
+    if status != cv2.Stitcher_OK:
+        print("Can't stitch images, error code = {}".format(status))
+        return False
+    return True
