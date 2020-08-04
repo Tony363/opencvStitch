@@ -1,0 +1,213 @@
+import cv2
+import time
+import threading
+from flask import Response, Flask
+import argparse
+#from stitching_video_thread import left_camera, right_camera, final_camera,test
+
+import stitching_video_thread
+# Initialize left, right and panorama images
+
+# Image frame sent to the Flask object
+global video_frame
+video_frame = None
+
+
+global left_frame
+global right_frame
+global pano
+
+
+left_frame = None
+right_frame = None
+pano = None
+
+# Use locks for thread-safe viewing of frames in multiple browsers
+global thread_lock 
+thread_lock = threading.Lock()
+
+
+global left_lock 
+left_lock = threading.Lock()
+global right_lock 
+right_lock = threading.Lock()
+global pano_lock 
+pano_lock = threading.Lock()
+
+# Argparse
+modes = (cv2.Stitcher_PANORAMA, cv2.Stitcher_SCANS)
+
+
+# GStreamer Pipeline to access the Raspberry Pi camera
+#GSTREAMER_PIPELINE = 'nvarguscamerasrc ! video/x-raw(memory:NVMM), width=3280, height=2464, format=(string)NV12, framerate=21/1 ! nvvidconv flip-method=0 ! video/x-raw, width=960, height=616, format=(string)BGRx ! videoconvert ! video/x-raw, format=(string)BGR ! appsink wait-on-eos=false max-buffers=1 drop=True'
+
+# Create the Flask object for the application
+app = Flask(__name__)
+
+def captureFrames():
+    global video_frame, thread_lock
+    
+
+    # Video capturing from OpenCV
+    #video_capture = cv2.VideoCapture(GSTREAMER_PIPELINE, cv2.CAP_GSTREAMER)
+    video_capture = cv2.VideoCapture(0)
+    print("Video capture initialized ...")
+    while True and video_capture.isOpened():
+        return_key, frame = video_capture.read()
+        if not return_key:
+            break
+        # Create a copy of the frame and store it in the global variable,
+        # with thread safe access
+        with thread_lock:
+            video_frame = frame.copy()
+        
+
+        key = cv2.waitKey(30) & 0xff
+        if key == 27:
+            break
+    
+    print("Video capture released ...")
+    video_capture.release()
+
+
+        
+def encodeFrame():
+    global thread_lock
+    while True:
+        # Acquire thread_lock to access the global video_frame object
+        with thread_lock: 
+            global video_frame
+            if video_frame is None:
+                continue
+            return_key, encoded_image = cv2.imencode(".jpg", video_frame)
+            if not return_key:
+                continue
+        
+        # Output image as a byte array
+        yield(b'--frame\r\n' b'Content-Type: image/jpeg\r\n\r\n' + 
+            bytearray(encoded_image) + b'\r\n')
+
+        # NB : return would just send the frame at the request time.
+
+
+def encodeLeftFrame():
+    while True:
+        # Acquire thread_lock to access the global video_frame object
+        if stitching_video_thread.left_image is None:
+            continue
+        return_key, encoded_image = cv2.imencode(".jpg", stitching_video_thread.left_image)
+        if not return_key:
+            continue
+        
+        # Output image as a byte array
+        yield(b'--frame\r\n' b'Content-Type: image/jpeg\r\n\r\n' + 
+            bytearray(encoded_image) + b'\r\n')
+
+        # NB : return would just send the frame at the request time.
+
+
+def encodeRightFrame():
+    while True:
+        # Acquire thread_lock to access the global video_frame object
+        if stitching_video_thread.right_image is None:
+            continue
+        return_key, encoded_image = cv2.imencode(".jpg", stitching_video_thread.right_image)
+        if not return_key:
+            continue
+    
+        # Output image as a byte array
+        yield(b'--frame\r\n' b'Content-Type: image/jpeg\r\n\r\n' + 
+            bytearray(encoded_image) + b'\r\n')
+
+        # NB : return would just send the frame at the request time.
+
+
+def encodeStitchedFrame():
+    while True:
+        # Acquire thread_lock to access the global video_frame object
+        #with stitching_video_thread.final_camera.read_lock: 
+        if stitching_video_thread.pano is None:
+            continue
+        return_key, encoded_image = cv2.imencode(".jpg", stitching_video_thread.pano)
+        if not return_key:
+            continue
+        
+        # Output image as a byte array
+        yield(b'--frame\r\n' b'Content-Type: image/jpeg\r\n\r\n' + 
+            bytearray(encoded_image) + b'\r\n')
+
+        # NB : return would just send the frame at the request time.
+
+
+
+@app.route("/")
+def streamFrames():
+    return Response(encodeLeftFrame(), mimetype = "multipart/x-mixed-replace; boundary=frame")
+
+@app.route("/left")
+def streamLeft():
+    return Response(encodeLeftFrame(), mimetype = "multipart/x-mixed-replace; boundary=frame")
+
+@app.route("/right")
+def streamRight():
+    return Response(encodeRightFrame(), mimetype = "multipart/x-mixed-replace; boundary=frame")
+
+
+@app.route("/stitch")
+def streamStitch():
+    return Response(encodeStitchedFrame(), mimetype = "multipart/x-mixed-replace; boundary=frame")
+
+
+""" Another Data Streaming example
+In this example, the 1500 rows are generated when the request is received. Therefore the data is not kept in memory
+"""
+@app.route('/large.csv')
+def generate_large_csv():
+    def generate():
+        for row in range(15000):
+            yield ',' + 'e' + '\n'
+    return Response(generate(), mimetype='text/csv')
+
+
+
+def read_args():
+    parser = argparse.ArgumentParser(prog='stitching.py', description='Stitching sample.')
+    parser.add_argument('--mode',type = int, choices = modes, default = cv2.Stitcher_PANORAMA,
+    help = 'Determines configuration of stitcher. The default is `PANORAMA` (%d), '
+            'mode suitable for creating photo panoramas. Option `SCANS` (%d) is suitable '
+            'for stitching materials under affine transformation, such as scans.' % modes)
+    parser.add_argument('--interface', default='usb',help='define the cameras interface (usb|mipi|none)')
+    parser.add_argument('--capture_width', type=int, help='Cameras capture width')
+    parser.add_argument('--capture_height', type=int, help='Cameras capture height')
+    parser.add_argument('--videos',nargs='+',help='input videos. To use videos file, set \'interface\' to none')
+    parser.add_argument('--img', nargs='+', help = 'input images')
+    parser.add_argument('--output', default = 'result.mp4',help = 'Resulting video. The default output name is `result.mp4`.')
+    parser.add_argument('--stop_frame',type=int,help='Limit of frames to stitch')
+    parser.add_argument('--view',action='store_true',help='view stitch in windows')
+    args = parser.parse_args()
+    
+    return parser,args
+
+
+# check to see if this is the main thread of execution
+if __name__ == '__main__':
+    # Read args
+    parser, args = read_args()
+
+    # Create a thread and attach the method that captures the image frames, to it
+    #process_thread = threading.Thread(target=captureFrames)
+    #process_thread.daemon = True
+
+    # Start the thread
+    #process_thread.start()
+
+    # Start stitching_video_thread
+    
+    stitching_thread = threading.Thread(target=stitching_video_thread.main, args=[args])
+    stitching_thread.start()
+    #stitching_video_thread.main(args)
+
+    # start the Flask Web Application
+    # While it can be run on any feasible IP, IP = 0.0.0.0 renders the web app on
+    # the host machine's localhost and is discoverable by other machines on the same network 
+    app.run("0.0.0.0", port="8000")

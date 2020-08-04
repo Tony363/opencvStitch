@@ -1,11 +1,11 @@
 #!/usr/bin/env python
 
 '''
-Stitching sample
+Stream stitching
 ================
 
-Show how to use Stitcher API from python in a simple way to stitch panoramas
-or scans.
+This file allows streamed stitching using different threads to capture frames from cameras, stitch the frame and display them
+It supports online stitching (real-time) through USB and MIPI cameras and offline stitching (video file)
 '''
 
 # Python 2/3 compatibility
@@ -21,8 +21,24 @@ import time
 from camera import CSI_Camera,Panorama
 from gstreamer import gstreamer_pipeline
 
+global left_camera
+left_camera = None
+global right_camera
+right_camera = None
+global final_camera
+final_camera = None
+
+global left_image
+left_image = None
+global right_image
+right_image = None
+global pano
+pano = None
+
 modes = (cv2.Stitcher_PANORAMA, cv2.Stitcher_SCANS)
 out_path = "result.mp4"
+
+
 
 class CODES:
     INFO = "[INFO]"
@@ -56,6 +72,7 @@ def get_minimum_total_frame(left_capture, right_capture):
 # BUT the stitching is done separetely in another thread
 # Display 10 FPS 
 def read_vid_thread(stitcher,interface,capture_width, capture_height,videos,stop_frame = None,view=False):
+    global left_camera, right_camera, left_image, right_image, final_camera, pano
     left_camera = CSI_Camera()
     right_camera = CSI_Camera()
 
@@ -109,12 +126,13 @@ def read_vid_thread(stitcher,interface,capture_width, capture_height,videos,stop
         _ , right_image=right_camera.read()
         camera_images = np.hstack((left_image, right_image))
         camera_images = imutils.resize(camera_images, width = 1980)
-        cv2.imshow("CSI Cameras", camera_images)
+        if view:
+            cv2.imshow("CSI Cameras", camera_images)
 
         
         # Show the panorama stream (stitched video streams)
         _, pano = final_camera.read()
-        if pano is not None:
+        if pano is not None and view:
             pano = imutils.resize(pano, width=1980)
             cv2.imshow("Stitched view", pano)
 
@@ -122,6 +140,7 @@ def read_vid_thread(stitcher,interface,capture_width, capture_height,videos,stop
         keyCode = cv2.waitKey(30) & 0xFF
         # Stop the program on the ESC key
         if keyCode == 27:
+            print(CODES.INFO, "Successfully quit the program.")
             break
 
     left_camera.stop()
@@ -136,6 +155,8 @@ def read_vid_thread(stitcher,interface,capture_width, capture_height,videos,stop
 # This read_vid function will display the left/right frames, stitch and display the result in the same thread
 # Display is 2FPS (500ms)
 def read_vid(stitcher,interface,capture_width,capture_height,videos,stop_frame = None,view=False):
+    global left_camera
+    global right_camera
     left_camera = CSI_Camera()
     right_camera = CSI_Camera()
     # Use offline videos file
@@ -193,6 +214,7 @@ def read_vid(stitcher,interface,capture_width,capture_height,videos,stop_frame =
     execution_time = timer()
 
     while True:
+       
         start_time = timer()
         Lret , left_frame=left_camera.read()
         Rret , right_frame=right_camera.read()
@@ -286,6 +308,8 @@ def main(args):
         read_vid_thread(stitcher,args.interface,args.capture_width,args.capture_height,args.videos,args.stop_frame,args.view)
     
 
+# Python 3 
+# ex usage : python stitching_video_thread.py --interface none --videos ../inputs/left.mp4 ../inputs/right.mp4 --view --capture_width 640 --capture_height=480
 def command_args():
     parser = argparse.ArgumentParser(prog='stitching.py', description='Stitching sample.')
     parser.add_argument('--mode',type = int, choices = modes, default = cv2.Stitcher_PANORAMA,
@@ -304,7 +328,6 @@ def command_args():
     return parser,args
 
 if __name__ == '__main__':
-    
     parser,args = command_args()
     """
     __doc__ += '\n' + parser.format_help()

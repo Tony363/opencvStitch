@@ -4,6 +4,7 @@
 # apt-get install build-essential git python3 python3-dev cmake
 
 # 1. Create python virtual environment
+chmod +x install.sh
 cd stitching_video/python
 python3 -m venv stitch-venv
 cd stitch-venv/bin
@@ -21,6 +22,8 @@ cmake -D CMAKE_BUILD_TYPE=RELEASE \
 	-D CMAKE_INSTALL_PREFIX=/usr/local \
 	-D INSTALL_PYTHON_EXAMPLES=ON \
 	-D OPENCV_ENABLE_NONFREE=ON \
+	-D WITH_GTK=ON \
+	-D WITH_V4L=ON \
 	-D PYTHON_EXECUTABLE=$PYTHON_PATH ..
 
 #cmake -D CMAKE_BUILD_TYPE=RELEASE -D CMAKE_INSTALL_PREFIX=/usr/local -D INSTALL_PYTHON_EXAMPLES=ON -D OPENCV_ENABLE_NONFREE=ON -D BUILD_NEW_PYTHON_SUPPORT=ON -D BUILD_opencv_python3=ON -D HAVE_opencv_python3=ON -D PYTHON_EXECUTABLE=/opencv-stitch/stitching_video/python/stitch-venv/bin/python3 ..
@@ -39,3 +42,7 @@ cd stitching_video/python/stitch-venv/lib/python3.6/site-packages/
 ln -s /usr/local/lib/python3.6/dist-packages/cv2/python-3.6/cv2.so cv2.so
 
 
+# Link on Jetson Nano
+# cd /usr/lib/python3.6/dist-packages/cv2/python3.6
+# NB : might need to remove .so in below folder first
+# ln -s /home/teamplay/opencv-stitch/build/lib/python3/cv2.cpython-36m-aarch64-linux-gnu.so cv2.so
