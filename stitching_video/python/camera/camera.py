@@ -56,7 +56,9 @@ class CSI_Camera:
                 if (capture_width is not None and capture_height is not None):
                     self.video_capture.set(cv2.CAP_PROP_FRAME_WIDTH, int(capture_width)) # Set width of the frame in the video frame
                     self.video_capture.set(cv2.CAP_PROP_FRAME_HEIGHT, int(capture_height))
-                    print(CODES.INFO,"Capture width and height set to : {}x{}".format(capture_width,capture_height))
+                
+                print(CODES.INFO,"Capture width and height set to : {}x{}".format(
+                    self.video_capture.get(cv2.CAP_PROP_FRAME_WIDTH),self.video_capture.get(cv2.CAP_PROP_FRAME_HEIGHT)))
                 # Video decoder (Speed performance)
                 self.video_capture.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc('M', 'J', 'P', 'G'))
                 print(CODES.INFO,"Video decoder set to : MJPG")
@@ -136,6 +138,7 @@ class Panorama:
         self.stitcher = cv2.Stitcher.create(cv2.Stitcher_PANORAMA)
         self.imgs = []
         self.stitched_frames = 0
+        self.to_estimate = True
 
         # Initialize CSI cameras
         self.left_camera = left_camera
@@ -183,11 +186,12 @@ class Panorama:
 
                         stitch_start_time = time.time()
                     
-                        if self.stitched_frames == 0:
+                        if self.stitched_frames == 0 or self.to_estimate is True:
                             status = self.stitcher.estimateTransform([left_image,right_image])
                             if status_check(status):
                                 print(CODES.INFO, "Transform successfully estimated")
-                        
+                                self.to_estimate = False
+
                             status,pano = self.stitcher.composePanorama([left_image,right_image],pano)
                             if not status_check(status):
                                 continue

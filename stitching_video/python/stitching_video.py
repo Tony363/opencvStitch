@@ -4,6 +4,7 @@
 Threaded stitching
 ================
 Stitch videos from files or USB/MIPI cameras using different threads for reading the frames, stitching and displaying
+Also uses camera.py library classes
 '''
 
 # Python 2/3 compatibility
@@ -15,9 +16,8 @@ import imutils
 import argparse
 import sys
 
-
-from camera import CSI_Camera,Panorama, get_minimum_total_frame, status_check
-from gstreamer import gstreamer_pipeline
+from camera.camera import CSI_Camera,Panorama, get_minimum_total_frame, status_check
+from camera.gstreamer import gstreamer_pipeline
 from utils import *
 
 # Stitching variables
@@ -36,16 +36,14 @@ OUT_PATH = "result.mp4"
 DONE = False
 
 
-def view_stitch(pano):
-    resized = imutils.resize(cv2.UMat.get(pano),width=1920)
-    cv2.imshow('Stitched Panorama',resized)
-
-
-
-# This read_vid function will display the left/right frames, the result panorama in the same thread
-# BUT the stitching is done separetely in another thread
-# Display 10 FPS 
 def read_vid_thread(stitcher,interface,device0,device1,capture_width, capture_height,videos,stop_frame = None,view=False, display_width=1080):
+    """
+    This read_vid function will display the left/right frames, the result panorama in the same thread
+    BUT the stitching is done separetely in another thread
+    total time (4K) : 500ms
+    compose_time (4K) : 500ms
+    """
+    
     global left_camera, right_camera, left_image, right_image, final_camera, pano
     left_camera = CSI_Camera(interface, capture_width, capture_height)
     right_camera = CSI_Camera(interface, capture_width, capture_height)
@@ -56,7 +54,7 @@ def read_vid_thread(stitcher,interface,device0,device1,capture_width, capture_he
         right_camera.open(interface,videos[1],capture_width, capture_height)
 
     # Use the MIPI interface cameras
-    elif interface=="mipi":
+    elif interface=="mipi" and device0 and device1:
         
         left_camera.open(interface,gstreamer_pipeline(
             sensor_id=0,
@@ -73,11 +71,11 @@ def read_vid_thread(stitcher,interface,device0,device1,capture_width, capture_he
             display_width=960,
         ),capture_width, capture_height)
      # Use the USB interface cameras
-    elif interface=="usb":
+    elif interface=="usb" and device0 and device1:
         left_camera.open(interface,device0,capture_width, capture_height)
         right_camera.open(interface,device1,capture_width, capture_height)
     else:
-        print(CODES.ERROR,"Interface does not exist.")
+        print(CODES.ERROR,"Interface does not exist or devices/videos do not match with the interface")
         SystemExit(0)
 
 
@@ -99,10 +97,10 @@ def read_vid_thread(stitcher,interface,device0,device1,capture_width, capture_he
         _ , left_image=left_camera.read()
         _ , right_image=right_camera.read()
         
-        input_display_time = timer()
-        camera_images = np.hstack((left_image, right_image)) #70 ms on 4K, 7ms on width 640
-        camera_images = imutils.resize(camera_images, width = display_width)
+        input_display_time = timer() 
         if view:
+            camera_images = np.hstack((left_image, right_image)) #70 ms on 4K, 7ms on width 640
+            camera_images = imutils.resize(camera_images, width = display_width)
             cv2.imshow("Left/Right Cameras", camera_images)
         timer(input_display_time, "input_display_time")
         
@@ -117,10 +115,17 @@ def read_vid_thread(stitcher,interface,device0,device1,capture_width, capture_he
             wait_key_time = timer()
             keyCode = cv2.waitKey(30) & 0xFF
             timer(wait_key_time,"wait_key_time")
-            # Stop the program on the ESC key
-            if keyCode == 27:
+
+            if keyCode == ord('q'):
                 print(CODES.INFO, "Successfully quit the program.")
                 break
+
+            elif keyCode == ord('e'):
+                    print(CODES.INFO, "'e' was pressed. ESTIMATING THE TRANSFORM ...")
+                    if SAVE is False:
+                        final_camera.to_estimate = True
+                    else:
+                        print(CODES.ERROR, "Cannot estimate new transform if the output is saved")
 
         timer(pano_display_time,"pano_display_time")
 
@@ -134,9 +139,14 @@ def read_vid_thread(stitcher,interface,device0,device1,capture_width, capture_he
     return None
 
 
-# This read_vid function will display the left/right frames, stitch and display the result in the same thread
-# Display is 2FPS (500ms)
-def read_vid(stitcher,interface,capture_width,capture_height,videos,stop_frame = None,view=False):
+def read_vid(stitcher,interface,device0,device1,capture_width,capture_height,videos,stop_frame = None,view=False, display_width = 1080):
+    """
+    Sequential stitching (not used here)
+    This read_vid function will display the left/right frames, stitch and display the result in the same thread
+    Total (4K) : 2FPS (550ms) 
+    Compose_time (4K) : 410ms
+    """
+    
     global left_camera
     global right_camera
     left_camera = CSI_Camera(interface, capture_width, capture_height)
@@ -206,11 +216,12 @@ def read_vid(stitcher,interface,capture_width,capture_height,videos,stop_frame =
 
         if Lret and Rret:
             # Estimate the transform on first frame
-            if readFrame == 0 :
+            if readFrame == 0:
                 status = stitcher.estimateTransform([left_frame,right_frame])
                 if status_check(status):
                     print(CODES.INFO, "Transform successfully estimated")
-                
+
+
                 status,pano = stitcher.composePanorama([left_frame,right_frame],pano)
                 if not status_check(status):
                     continue
@@ -239,11 +250,15 @@ def read_vid(stitcher,interface,capture_width,capture_height,videos,stop_frame =
 
             
             # View the stitched panorama. Press "q" to quit the program.
-            if view:
-                view_stitch(pano)
+            if pano is not None and view:
+                pano_resized = cv2.UMat.get(pano)
+                pano_resized = imutils.resize(pano_resized, width = display_width)
+                cv2.imshow("Stitched view", pano_resized)
                 if cv2.waitKey(1) == ord('q'):
                     print(CODES.INFO, "Successfully quit the program.")
                     break
+                
+                
 
             print(CODES.INFO, "{}/{} Stitched successfully. Done in {:.3f}s".format(readFrame, stop_frame,timer(start_time)))
             if SAVE:
@@ -284,13 +299,17 @@ def main(args):
     SAVE = args.save
     OUT_PATH = args.output
     
-    read_vid_thread(stitcher,args.interface,args.device0,args.device1,args.capture_width,args.capture_height,args.videos,args.stop_frame,args.view, args.display_width)
+    if args.nothread:
+        read_vid(stitcher,args.interface,args.device0,args.device1,args.capture_width,args.capture_height,args.videos,args.stop_frame,args.view, args.display_width)
+    else:   
+        read_vid_thread(stitcher,args.interface,args.device0,args.device1,args.capture_width,args.capture_height,args.videos,args.stop_frame,args.view, args.display_width)
     
 
 # Python 3 
 # ex usage (local) : python3 stitching_video.py --interface none --videos ../inputs/left.mp4 ../inputs/right.mp4 --view --capture_width 640 --capture_height=480
 # ex usage (USB camera) : python3 stitching_video.py --device0 0 --device1 1 --capture_width 640 --capture_height=480 --view 
-
+# ex usage (USB camera, 4K) : python3 stitching_video.py --device0 0 --device1 1 --capture_width 3840 --capture_height=2160 --view    
+# ex usage (local, no thread) : python3 stitching_video.py --interface none --videos ../inputs/left.mp4 ../inputs/right.mp4 --view --capture_width 640 --capture_height=480 --nothread
 def command_args():
     parser = argparse.ArgumentParser(prog='stitching_video.py', description='threaded stitching sample.')
     parser.add_argument('--mode',type = int, choices = modes, default = cv2.Stitcher_PANORAMA,
@@ -308,6 +327,7 @@ def command_args():
     parser.add_argument('--stop_frame',type=int,help='Limit of frames to stitch')
     parser.add_argument('--view',action='store_true',help='view stitch in windows')
     parser.add_argument('--display_width', type=int,default=1080, help='Cameras display width')
+    parser.add_argument('--nothread', action='store_true', help='Run the stitching without threads')
     args = parser.parse_args()
     return parser,args
 
