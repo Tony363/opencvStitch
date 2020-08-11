@@ -5,15 +5,17 @@ import sys
 import imutils
 import numpy as np
 
-class CODES:
-    INFO = "[INFO]"
-    ERROR = "[ERROR]"
+from utils import *
 
 
 class CSI_Camera:
 
-    def __init__ (self) :
+    def __init__ (self,interface,capture_width, capture_height) :
         # Initialize instance variables
+        # Camera properties
+        self.interface = interface
+        self.capture_width = capture_width
+        self.capture_height = capture_height
         # OpenCV video capture element
         self.video_capture = None
         # The last captured image from the camera
@@ -46,41 +48,31 @@ class CSI_Camera:
         elif interface == "usb" or interface == "none":
             try:
                 if interface == "none":
-                    self.video_capture = cv2.VideoCapture(filename) 
+                    self.video_capture = cv2.VideoCapture(filename)
                 elif interface == "usb":
                     self.video_capture = cv2.VideoCapture(filename,cv2.CAP_V4L) 
-                print("{} Camera {} successfully opened".format(interface,filename))
+                print(CODES.INFO,"{} type Camera {} successfully opened".format(interface,filename))
                 #https://docs.opencv.org/3.4/d4/d15/group__videoio__flags__base.html#gaeb8dd9c89c10a5c63c139bf7c4f5704d
                 if (capture_width is not None and capture_height is not None):
                     self.video_capture.set(cv2.CAP_PROP_FRAME_WIDTH, int(capture_width)) # Set width of the frame in the video frame
                     self.video_capture.set(cv2.CAP_PROP_FRAME_HEIGHT, int(capture_height))
-                    print("Capture width and height set to : {}x{}".format(capture_width,capture_height))
+                    print(CODES.INFO,"Capture width and height set to : {}x{}".format(capture_width,capture_height))
                 # Video decoder (Speed performance)
                 self.video_capture.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc('M', 'J', 'P', 'G'))
-                print("Video decoder set to : MJPG")
+                print(CODES.INFO,"Video decoder set to : MJPG")
 
             except RuntimeError:
                 self.video_capture = None
                 print("Unable to open camera")
                 print("Pipeline: " + filename)
                 return
+
             # Grab the first frame to start the video capturing
             self.grabbed, self.frame = self.video_capture.read()
+            # If the video is a file (interface == "none") the video must be manually resized before stitch
+            if self.interface == "none":
+                self.frame = imutils.resize(self.frame, self.capture_width)
             
-    """
-    # Open videos file using opencv VideoCapture
-    def openFile(self, interface, video_name):
-        try:
-            self.video_capture = cv2.VideoCapture(video_name)
-            
-        except RuntimeError:
-            self.video_capture = None
-            print("Unable to open camera")
-            return
-        # Grab the first frame to start the video capturing
-        self.grabbed, self.frame = self.video_capture.read()
-    """
-
     def start(self):
         if self.running:
             print('Video capturing is already running')
@@ -95,12 +87,17 @@ class CSI_Camera:
     def stop(self):
         self.running=False
         self.read_thread.join()
+        print(CODES.INFO, "Video capturing thread quit.")
 
     def updateCamera(self):
         # This is the thread to read images from the camera
         while self.running:
             try:
                 grabbed, frame = self.video_capture.read()
+
+                # If the video is a file (interface == "none") the video must be manually resized before stitch
+                if self.interface == "none":
+                    frame = imutils.resize(frame, self.capture_width)
                 if grabbed:
                     with self.read_lock:
                         self.grabbed=grabbed
@@ -128,10 +125,13 @@ class CSI_Camera:
 
 
 class Panorama:
-    def __init__(self, left_camera, right_camera):
+    def __init__(self, left_camera, right_camera,stop_frame, save, out_path):
         # panorama image
         self.status = None
         self.pano = None
+        self.save = save
+        self.out_path = out_path
+        
         # Initialize Stitcher class
         self.stitcher = cv2.Stitcher.create(cv2.Stitcher_PANORAMA)
         self.imgs = []
@@ -141,9 +141,16 @@ class Panorama:
         self.left_camera = left_camera
         self.right_camera = right_camera
 
+        # Limit of stitched frames
+        self.isDone = False
+        if (stop_frame is None and self.left_camera.interface == "none"):
+            self.stop_frame = get_minimum_total_frame(left_camera.video_capture,right_camera.video_capture)
+        else:
+            self.stop_frame = stop_frame
+        
 
-        # The thread where the video capture runs
-        self.read_thread = None
+        # The thread where the video stitching runs
+        self.stitch_thread = None
         self.read_lock = threading.Lock()
         self.running = False
         self.save_thread = None
@@ -159,9 +166,12 @@ class Panorama:
         self.read_thread.start()
         return self
 
+    # Thread that stitches frames
     def stitchCamera(self):
 
-            # This is the thread to read images from the camera
+            # NB : cv2.UMat array is faster than np array
+            pano = cv2.UMat(np.asarray([]))
+            readFrame = 0
             while self.running:
                 try:
                     # Initialize left and right frames
@@ -171,10 +181,8 @@ class Panorama:
                         _, left_image = self.left_camera.read()
                         _, right_image = self.right_camera.read()
 
-                    
                         stitch_start_time = time.time()
-                        # NB : cv2.UMat array is faster than np array
-                        pano = cv2.UMat(np.asarray([]))
+                    
                         if self.stitched_frames == 0:
                             status = self.stitcher.estimateTransform([left_image,right_image])
                             if status_check(status):
@@ -190,16 +198,29 @@ class Panorama:
                             h,w = cv2.UMat.get(pano).shape[:2] # Convert UMat to numpy array
                             fps = min(capL.get(cv2.CAP_PROP_FPS),capR.get(cv2.CAP_PROP_FPS))
                             fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-                            out = cv2.VideoWriter("result.mp4",fourcc,fps,(w,h))
+                            out = cv2.VideoWriter(self.out_path,fourcc,fps,(w,h))
                             print(CODES.INFO, "Video Writer initialized with {:.1f} fps and shape {}x{}".format(fps,w,h))
 
                         else:
+                            # Quit stitching if the frame limit is reached
+                            if readFrame == self.stop_frame:
+                                self.isDone = True
+                                print(CODES.INFO,"Stitching stop frame reached.")
+                                break
+
+                            compose_time = timer()
                             status, pano = self.stitcher.composePanorama([left_image,right_image],pano)
+                            timer(compose_time, "compose_time")
                             if not status_check(status):
                                 print(CODES.ERROR, "composePanorama failed.") 
                                 continue
                             
-                        print("Stitching completed successfully ({}). Done in {:.3f}s".format(self.stitched_frames,time.time() - stitch_start_time))
+
+                        print(CODES.INFO,"Stitching completed successfully ({}/{}). Done in {:.3f}s".format(self.stitched_frames + 1,self.stop_frame,timer(stitch_start_time)))
+                        readFrame += 1
+                        if self.save:
+                            out.write(pano)
+
                         with self.read_lock:
                             self.status=status
                             self.pano=pano
@@ -223,8 +244,16 @@ class Panorama:
     def stop(self):
         self.running=False
         self.read_thread.join()
+        print(CODES.INFO, "Video stitching thread quit.")
 
 
+
+def get_minimum_total_frame(left_capture, right_capture):
+    left_total_frame = int(left_capture.get(cv2.CAP_PROP_FRAME_COUNT))
+    right_total_frame = int(right_capture.get(cv2.CAP_PROP_FRAME_COUNT))
+    total_frame = min(left_total_frame, right_total_frame)
+    print(CODES.INFO, "Total frames set to {}".format(total_frame))
+    return total_frame
 
 def status_check(status):
     if status != cv2.Stitcher_OK:

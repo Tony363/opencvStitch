@@ -18,6 +18,7 @@ using namespace cv::detail;
 using namespace std::chrono; 
 
 
+
 // Video parameters
 int outputFPS = 60;
 vector<string> video_names;
@@ -105,6 +106,7 @@ int main(int argc, char* argv[])
     VideoCapture rightCapture(video_names[1]);
     int leftTotalFrames = int(leftCapture.get(CAP_PROP_FRAME_COUNT));
     int rightTotalFrames = int(rightCapture.get(CAP_PROP_FRAME_COUNT));
+    outputFPS = int(rightCapture.get(CAP_PROP_FPS));
     // Set the number of frames of the final panorama video
     if (leftTotalFrames != rightTotalFrames || stopFrame == 0)
     {
@@ -112,7 +114,6 @@ int main(int argc, char* argv[])
         cout << CODE_INFO << "Streams Total frames are different. stopFrame will be set to the minimum "<< stopFrame << endl;
 
     }
-        
      
 
     // Initialize camera
@@ -306,6 +307,11 @@ int main(int argc, char* argv[])
 
         imgs.push_back(rightFrame);
 
+        high_resolution_clock::time_point stop_read = high_resolution_clock::now(); 
+        auto duration_read = duration_cast<microseconds>(stop_read - startTimeFrame);
+        cout << CODE_INFO << "read time " << duration_read.count() / 1000<< "ms." << endl;
+        
+
         // Estimate transform between the two cameras on the first frame
         if (readFrame == 0)
         {
@@ -321,7 +327,7 @@ int main(int argc, char* argv[])
             }
             else
             {
-                // 
+                // Cameras' parameters
                 std::vector<detail::CameraParams> cameras_ = stitcher->cameras();
                 cout << CODE_INFO << "Number of cameras : " << cameras_.size() << endl;
                 cout << CODE_INFO << "Transform successfully estimated on frame. Status : " << int(status) << endl;
@@ -335,7 +341,13 @@ int main(int argc, char* argv[])
         
 
         // Stitching the two images into a panorama view
+        high_resolution_clock::time_point start_compose = high_resolution_clock::now();
         status = stitcher->composePanorama(imgs, pano);
+        high_resolution_clock::time_point stop_compose = high_resolution_clock::now();
+        auto duration_compose = duration_cast<microseconds>(stop_compose - start_compose);
+        cout << CODE_INFO << "composePanorama time : "<< duration_compose.count() / 1000<< "ms." << endl;
+        
+
         if (status != Stitcher::OK)
         {
             cout << CODE_ERROR  << "Can't stitch images, error code = " << int(status) << endl;
@@ -353,16 +365,21 @@ int main(int argc, char* argv[])
             // TODO : if panorama size is too large, try next frames (in order to get better keypoints)
             if (pano.size().width < 8192 && pano.size().height < 8192)
                 outputVideo.open(result_name,VideoWriter::fourcc('m','p','4','v'),outputFPS, Size(pano.size().width, pano.size().height)); // mp4v codec does not support video with size larger than 8192x8192.
+               //outputVideo.open("result.mkv",VideoWriter::fourcc('x','2','6','4'),outputFPS, Size(pano.size().width, pano.size().height)); // mp4v codec does not support video with size larger than 8192x8192.
             else
                 outputVideo.open("result.avi",VideoWriter::fourcc('M','J','P','G'),40, Size(pano.size().width, pano.size().height)); // .AVI supports large video but the compression is very small 
 
-            cout << CODE_INFO << "VideoWriter initialized (" << outputFPS << ") with the following shape : " <<  pano.size().width << "x" << pano.size().height << endl;
+            cout << CODE_INFO << "VideoWriter initialized " << outputFPS << "FPS" << " with the following shape : " <<  pano.size().width << "x" << pano.size().height << endl;
             isInitialized = true;
         }
 
         
         // Save frame in video
+        high_resolution_clock::time_point start_write = high_resolution_clock::now();
         outputVideo.write(pano); 
+        high_resolution_clock::time_point stop_write = high_resolution_clock::now();
+        auto duration_write = duration_cast<microseconds>(stop_write - start_write);
+        cout << CODE_INFO << "write time : "<< duration_write.count() / 1000<< "ms." << endl;
 
         // Calculate execution time for ONE single frame
         stopTimeFrame = high_resolution_clock::now(); 
@@ -400,7 +417,7 @@ int main(int argc, char* argv[])
         leftFrame.release();
         rightFrame.release();
 
-        // Quit the reading if the stop frame is reached
+        // Quit the reading if the frame limit is reached
         if (readFrame == stopFrame)
         {
            
@@ -449,6 +466,7 @@ void printUsage(char** argv)
          "      Show the openCV build info'\n"
          "  --output <result_video>\n"
          "      The default is 'result.mp4'.\n"
+         "  --try_use_gpu \n"
          "      Try to use CUDA. The default value is 'no'. All default values\n"
          "      are for CPU mode.\n"
          "  --features (surf|orb|sift|akaze)\n"

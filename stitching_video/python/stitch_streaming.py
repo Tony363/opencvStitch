@@ -1,11 +1,23 @@
+#!/usr/bin/env python3
+
+
+'''
+Stream stitching
+================
+
+Stream the stitching done by stitching_video.py using a Flask server.
+Left, right and stitched videos are displayed as preview and the user can start recording(saving)
+'''
+
+
 import cv2
 import time
 import threading
 from flask import Response, Flask
 import argparse
-#from stitching_video_thread import left_camera, right_camera, final_camera,test
+#from stitching_video import left_camera, right_camera, final_camera,test
 
-import stitching_video_thread
+import stitching_video
 # Initialize left, right and panorama images
 
 # Image frame sent to the Flask object
@@ -93,9 +105,9 @@ def encodeFrame():
 def encodeLeftFrame():
     while True:
         # Acquire thread_lock to access the global video_frame object
-        if stitching_video_thread.left_image is None:
+        if stitching_video.left_image is None:
             continue
-        return_key, encoded_image = cv2.imencode(".jpg", stitching_video_thread.left_image)
+        return_key, encoded_image = cv2.imencode(".jpg", stitching_video.left_image)
         if not return_key:
             continue
         
@@ -109,9 +121,9 @@ def encodeLeftFrame():
 def encodeRightFrame():
     while True:
         # Acquire thread_lock to access the global video_frame object
-        if stitching_video_thread.right_image is None:
+        if stitching_video.right_image is None:
             continue
-        return_key, encoded_image = cv2.imencode(".jpg", stitching_video_thread.right_image)
+        return_key, encoded_image = cv2.imencode(".jpg", stitching_video.right_image)
         if not return_key:
             continue
     
@@ -125,10 +137,10 @@ def encodeRightFrame():
 def encodeStitchedFrame():
     while True:
         # Acquire thread_lock to access the global video_frame object
-        #with stitching_video_thread.final_camera.read_lock: 
-        if stitching_video_thread.pano is None:
+        #with stitching_video.final_camera.read_lock: 
+        if stitching_video.pano is None:
             continue
-        return_key, encoded_image = cv2.imencode(".jpg", stitching_video_thread.pano)
+        return_key, encoded_image = cv2.imencode(".jpg", stitching_video.pano)
         if not return_key:
             continue
         
@@ -187,12 +199,14 @@ def read_args():
     parser.add_argument('--stop_frame',type=int,help='Limit of frames to stitch')
     parser.add_argument('--view',action='store_true',help='view stitch in windows')
     args = parser.parse_args()
-    
+    # TODO display width height
     return parser,args
 
 
 # check to see if this is the main thread of execution
-# ex usage : python3 stitch_streaming.py --interface none --videos ../inputs/left.mp4 ../inputs/right.mp4 --capture_width 640 --capture_height 480
+# ex usage(local) : python3 stitch_streaming.py --interface none --videos ../inputs/left.mp4 ../inputs/right.mp4 --capture_width 640 --capture_height 480
+# ex usage (jetson nx) : python3 stitch_streaming.py --capture_width 640 --capture_height 480 --device0 0 --device1 1 --view
+
 if __name__ == '__main__':
     # Read args
     parser, args = read_args()
@@ -204,11 +218,11 @@ if __name__ == '__main__':
     # Start the thread
     #process_thread.start()
 
-    # Start stitching_video_thread
+    # Start stitching_video
     
-    stitching_thread = threading.Thread(target=stitching_video_thread.main, args=[args])
+    stitching_thread = threading.Thread(target=stitching_video.main, args=[args])
     stitching_thread.start()
-    #stitching_video_thread.main(args)
+    #stitching_video.main(args)
 
     # start the Flask Web Application
     # While it can be run on any feasible IP, IP = 0.0.0.0 renders the web app on

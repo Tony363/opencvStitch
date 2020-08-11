@@ -26,6 +26,7 @@ CMakeSettings.json
 
 # Ignore video file and image file
 *.mp4
+*.mkv
 *.avi
 *.jpg
 *.jpeg
@@ -42,3 +43,5 @@ stitching_video/CMakeFiles
 
 # Ignore stitching_video python venv
 stitching_video/python/stitch-venv/
+# Ignore test file
+stitching_test  
