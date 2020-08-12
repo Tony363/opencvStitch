@@ -13,36 +13,18 @@ Left, right and stitched videos are displayed as preview and the user can start 
 import cv2
 import time
 import threading
-from flask import Response, Flask
+from flask import Response, Flask, render_template
 import argparse
 
 
 import stitching_video
 
 # Image frame sent to the Flask object
-global video_frame
 video_frame = None
-
-
-global left_frame
-global right_frame
-global pano
-
-
-left_frame = None
-right_frame = None
 pano = None
 
 # Use locks for thread-safe viewing of frames in multiple browsers
-global thread_lock 
 thread_lock = threading.Lock()
-
-
-global left_lock 
-left_lock = threading.Lock()
-global right_lock 
-right_lock = threading.Lock()
-global pano_lock 
 pano_lock = threading.Lock()
 
 # Argparse
@@ -114,7 +96,6 @@ def encodeLeftFrame():
         yield(b'--frame\r\n' b'Content-Type: image/jpeg\r\n\r\n' + 
             bytearray(encoded_image) + b'\r\n')
 
-        # NB : return would just send the frame at the request time.
 
 
 def encodeRightFrame():
@@ -130,46 +111,47 @@ def encodeRightFrame():
         yield(b'--frame\r\n' b'Content-Type: image/jpeg\r\n\r\n' + 
             bytearray(encoded_image) + b'\r\n')
 
-        # NB : return would just send the frame at the request time.
 
 
 def encodeStitchedFrame():
+    global pano
     while True:
         # Acquire thread_lock to access the global video_frame object
-        #with stitching_video.final_camera.read_lock: 
         if stitching_video.pano is None:
             continue
-        return_key, encoded_image = cv2.imencode(".jpg", stitching_video.pano)
+
+        with stitching_video.final_camera.read_lock:
+            pano = stitching_video.pano.copy()
+        
+        return_key, encoded_image = cv2.imencode(".jpg", pano)
         if not return_key:
             continue
         
+        
         # Output image as a byte array
-        yield(b'--frame\r\n' b'Content-Type: image/jpeg\r\n\r\n' + 
-            bytearray(encoded_image) + b'\r\n')
+        yield(b'--frame\r\n'b'Content-Type: image/jpeg\r\n\r\n' + 
+            encoded_image.tobytes() + b'\r\n')
 
-        # NB : return would just send the frame at the request time.
 
 
 
 @app.route("/")
-def streamFrames():
-    return Response(encodeLeftFrame(), mimetype = "multipart/x-mixed-replace; boundary=frame")
-
-@app.route("/left")
-def streamLeft():
-    a = encodeLeftFrame()
-    print(a)
-    return Response(a, mimetype = "multipart/x-mixed-replace; boundary=frame")
-
+def index():
+    return render_template('index.html')
     #return Response(encodeLeftFrame(), mimetype = "multipart/x-mixed-replace; boundary=frame")
 
+@app.route("/left")
+def left():
+    return Response(encodeLeftFrame(), mimetype = "multipart/x-mixed-replace; boundary=frame")
+
+
 @app.route("/right")
-def streamRight():
+def right():
     return Response(encodeRightFrame(), mimetype = "multipart/x-mixed-replace; boundary=frame")
 
 
 @app.route("/stitch")
-def streamStitch():
+def stitch():
     return Response(encodeStitchedFrame(), mimetype = "multipart/x-mixed-replace; boundary=frame")
 
 

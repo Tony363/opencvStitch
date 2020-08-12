@@ -206,7 +206,9 @@ class Panorama:
                                 fourcc = cv2.VideoWriter_fourcc(*'mp4v')
                                 out = cv2.VideoWriter(self.out_path,fourcc,fps,(w,h))
                                 print(CODES.INFO, "Video Writer initialized with {:.1f} fps and shape {}x{}".format(fps,w,h))
-
+                            
+                            print(CODES.INFO, "Initial left/right frame shape : {}x{}".format(left_image.shape[1],left_image.shape[0]))
+                        
                         else:
                             # Quit stitching if the frame limit is reached
                             if readFrame == self.stop_frame:
