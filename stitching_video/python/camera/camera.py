@@ -127,7 +127,7 @@ class CSI_Camera:
 
 
 class Panorama:
-    def __init__(self, left_camera, right_camera,stop_frame, save, out_path):
+    def __init__(self, left_camera, right_camera,stop_frame, save, out_path,timer):
         # panorama image
         self.status = None
         self.pano = None
@@ -139,6 +139,7 @@ class Panorama:
         self.imgs = []
         self.stitched_frames = 0
         self.to_estimate = True
+        self.timer = timer
 
         # Initialize CSI cameras
         self.left_camera = left_camera
@@ -197,13 +198,14 @@ class Panorama:
                                 continue
 
                             # Initialize the video writer object
-                            capL = self.left_camera.video_capture
-                            capR = self.right_camera.video_capture
-                            h,w = cv2.UMat.get(pano).shape[:2] # Convert UMat to numpy array
-                            fps = min(capL.get(cv2.CAP_PROP_FPS),capR.get(cv2.CAP_PROP_FPS))
-                            fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-                            out = cv2.VideoWriter(self.out_path,fourcc,fps,(w,h))
-                            print(CODES.INFO, "Video Writer initialized with {:.1f} fps and shape {}x{}".format(fps,w,h))
+                            if self.save:
+                                capL = self.left_camera.video_capture
+                                capR = self.right_camera.video_capture
+                                h,w = cv2.UMat.get(pano).shape[:2] # Convert UMat to numpy array
+                                fps = min(capL.get(cv2.CAP_PROP_FPS),capR.get(cv2.CAP_PROP_FPS))
+                                fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+                                out = cv2.VideoWriter(self.out_path,fourcc,fps,(w,h))
+                                print(CODES.INFO, "Video Writer initialized with {:.1f} fps and shape {}x{}".format(fps,w,h))
 
                         else:
                             # Quit stitching if the frame limit is reached
@@ -214,7 +216,7 @@ class Panorama:
 
                             compose_time = timer()
                             status, pano = self.stitcher.composePanorama([left_image,right_image],pano)
-                            timer(compose_time, "compose_time")
+                            timer(compose_time, "compose_time", self.timer)
                             if not status_check(status):
                                 print(CODES.ERROR, "composePanorama failed.") 
                                 continue

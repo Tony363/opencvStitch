@@ -16,9 +16,10 @@ import imutils
 import argparse
 import sys
 
+from utils import *
 from camera.camera import CSI_Camera,Panorama, get_minimum_total_frame, status_check
 from camera.gstreamer import gstreamer_pipeline
-from utils import *
+
 
 # Stitching variables
 left_camera = None
@@ -33,7 +34,7 @@ modes = (cv2.Stitcher_PANORAMA, cv2.Stitcher_SCANS)
 
 SAVE = False
 OUT_PATH = "result.mp4"
-DONE = False
+DISPLAY_TIMER = False
 
 
 def read_vid_thread(stitcher,interface,device0,device1,capture_width, capture_height,videos,stop_frame = None,view=False, display_width=1080):
@@ -83,7 +84,7 @@ def read_vid_thread(stitcher,interface,device0,device1,capture_width, capture_he
     right_camera.start()
 
     # Initialize Panorama class
-    final_camera = Panorama(left_camera, right_camera,stop_frame,SAVE, OUT_PATH)
+    final_camera = Panorama(left_camera, right_camera,stop_frame,SAVE, OUT_PATH, DISPLAY_TIMER)
     final_camera.start()
 
     if (not left_camera.video_capture.isOpened()
@@ -102,7 +103,7 @@ def read_vid_thread(stitcher,interface,device0,device1,capture_width, capture_he
             camera_images = np.hstack((left_image, right_image)) #70 ms on 4K, 7ms on width 640
             camera_images = imutils.resize(camera_images, width = display_width)
             cv2.imshow("Left/Right Cameras", camera_images)
-        timer(input_display_time, "input_display_time")
+        timer(input_display_time, "input_display_time", DISPLAY_TIMER)
         
         # Show the panorama stream (stitched video streams)
         _, pano = final_camera.read()
@@ -114,7 +115,7 @@ def read_vid_thread(stitcher,interface,device0,device1,capture_width, capture_he
 
             wait_key_time = timer()
             keyCode = cv2.waitKey(30) & 0xFF
-            timer(wait_key_time,"wait_key_time")
+            timer(wait_key_time,"wait_key_time",DISPLAY_TIMER)
 
             if keyCode == ord('q'):
                 print(CODES.INFO, "Successfully quit the program.")
@@ -127,7 +128,7 @@ def read_vid_thread(stitcher,interface,device0,device1,capture_width, capture_he
                     else:
                         print(CODES.ERROR, "Cannot estimate new transform if the output is saved")
 
-        timer(pano_display_time,"pano_display_time")
+        timer(pano_display_time,"pano_display_time",DISPLAY_TIMER)
 
         # Properly quit the main Thread
         # if the stitching is done or has reached the set limit frames
@@ -243,7 +244,7 @@ def read_vid(stitcher,interface,device0,device1,capture_width,capture_height,vid
                 
                 compose_time = timer()
                 status, pano = stitcher.composePanorama([left_frame,right_frame],pano)
-                timer(compose_time, "compose_time")
+                timer(compose_time, "compose_time",DISPLAY_TIMER)
 
                 if not status_check(status):
                     print(CODES.ERROR, "composePanorama failed.")
@@ -272,7 +273,7 @@ def read_vid(stitcher,interface,device0,device1,capture_width,capture_height,vid
 
         
     # Display Execution time
-    timer(execution_time,"execution_time")
+    timer(execution_time,"execution_time",DISPLAY_TIMER)
     # Clean memory
     print(CODES.INFO, "Clean memory ...")
     left_camera.stop()
@@ -294,11 +295,13 @@ def cleanMemory():
     print(CODES.INFO, "Memory cleaned successfully")
 
 def main(args):
+    global SAVE, OUT_PATH, DISPLAY_TIMER
     stitcher = cv2.Stitcher.create(args.mode)
 
     SAVE = args.save
     OUT_PATH = args.output
-    
+    DISPLAY_TIMER = args.timer
+
     if args.nothread:
         read_vid(stitcher,args.interface,args.device0,args.device1,args.capture_width,args.capture_height,args.videos,args.stop_frame,args.view, args.display_width)
     else:   
@@ -328,6 +331,7 @@ def command_args():
     parser.add_argument('--view',action='store_true',help='view stitch in windows')
     parser.add_argument('--display_width', type=int,default=1080, help='Cameras display width')
     parser.add_argument('--nothread', action='store_true', help='Run the stitching without threads')
+    parser.add_argument('--timer', action='store_true', help='Enable timer to evaluate performance')
     args = parser.parse_args()
     return parser,args
 

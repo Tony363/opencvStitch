@@ -15,10 +15,9 @@ import time
 import threading
 from flask import Response, Flask
 import argparse
-#from stitching_video import left_camera, right_camera, final_camera,test
+
 
 import stitching_video
-# Initialize left, right and panorama images
 
 # Image frame sent to the Flask object
 global video_frame
@@ -158,7 +157,11 @@ def streamFrames():
 
 @app.route("/left")
 def streamLeft():
-    return Response(encodeLeftFrame(), mimetype = "multipart/x-mixed-replace; boundary=frame")
+    a = encodeLeftFrame()
+    print(a)
+    return Response(a, mimetype = "multipart/x-mixed-replace; boundary=frame")
+
+    #return Response(encodeLeftFrame(), mimetype = "multipart/x-mixed-replace; boundary=frame")
 
 @app.route("/right")
 def streamRight():
@@ -183,7 +186,7 @@ def generate_large_csv():
 
 
 def read_args():
-    parser = argparse.ArgumentParser(prog='stitching.py', description='Stitching sample.')
+    parser = argparse.ArgumentParser(prog='stitching_video.py', description='threaded stitching sample.')
     parser.add_argument('--mode',type = int, choices = modes, default = cv2.Stitcher_PANORAMA,
     help = 'Determines configuration of stitcher. The default is `PANORAMA` (%d), '
             'mode suitable for creating photo panoramas. Option `SCANS` (%d) is suitable '
@@ -194,12 +197,14 @@ def read_args():
     parser.add_argument('--capture_width', type=int, help='Cameras capture width')
     parser.add_argument('--capture_height', type=int, help='Cameras capture height')
     parser.add_argument('--videos',nargs='+',help='input videos. To use videos file, set \'interface\' to none')
-    parser.add_argument('--img', nargs='+', help = 'input images')
+    parser.add_argument('--save', action='store_true',help = 'Save the stitched result')
     parser.add_argument('--output', default = 'result.mp4',help = 'Resulting video. The default output name is `result.mp4`.')
     parser.add_argument('--stop_frame',type=int,help='Limit of frames to stitch')
     parser.add_argument('--view',action='store_true',help='view stitch in windows')
+    parser.add_argument('--display_width', type=int,default=1080, help='Cameras display width')
+    parser.add_argument('--nothread', action='store_true', help='Run the stitching without threads')
+    parser.add_argument('--timer', action='store_true', help='Enable timer to evaluate performance')
     args = parser.parse_args()
-    # TODO display width height
     return parser,args
 
 
@@ -219,10 +224,8 @@ if __name__ == '__main__':
     #process_thread.start()
 
     # Start stitching_video
-    
     stitching_thread = threading.Thread(target=stitching_video.main, args=[args])
     stitching_thread.start()
-    #stitching_video.main(args)
 
     # start the Flask Web Application
     # While it can be run on any feasible IP, IP = 0.0.0.0 renders the web app on
