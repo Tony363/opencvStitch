@@ -72,7 +72,7 @@ def read_vid_thread(stitcher,interface,device0,device1,capture_width, capture_he
             display_width=960,
         ),capture_width, capture_height)
      # Use the USB interface cameras
-    elif interface=="usb" and device0 and device1:
+    elif interface=="usb" and device0 is not None and device1 is not None:
         left_camera.open(interface,device0,capture_width, capture_height)
         right_camera.open(interface,device1,capture_width, capture_height)
     else:
