@@ -298,7 +298,9 @@ def main(args):
     global SAVE, OUT_PATH, DISPLAY_TIMER
     stitcher = cv2.Stitcher.create(args.mode)
 
-    SAVE = args.save
+    if args.save is not None:
+        SAVE = args.save
+        
     OUT_PATH = args.output
     DISPLAY_TIMER = args.timer
 

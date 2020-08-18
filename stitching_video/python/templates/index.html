@@ -1,9 +1,42 @@
-<html>
-  <head>
-    <title>Live Video Stitching demonstration</title>
-  </head>
-  <body>
-    <h1>Live Video Stitching demonstration</h1>
-    <img src="{{ url_for('stitch') }}">
-  </body>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/css/bootstrap.min.css" integrity="sha384-ggOyR0iXCbMQv3Xipma34MD+dH/1fQ784/j6cY/iJTQUOhcWr7x9JvoRxT2MZw1T" crossorigin="anonymous">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/index.css') }}">
+  {{ fontawesome_html() }}
+  <title>Live Video Stitching demonstration</title>
+</head>
+<body>
+
+  <div class="container-fluid">
+
+    <div class="row justify-content-center">
+      <img src="{{ url_for('left') }}">  
+    </div>
+    <div class="row justify-content-center">
+      <h3 class="stopwatch"><time>00:00:00</time></h3>
+    </div>
+
+    <div class="row justify-content-center">
+      <form action="/" method="POST">
+      {% if button == 'play'%}
+      <button type="submit" class="btn btn-dark btn-circle btn-xl align-middle" id='play' name="play" value=1><i class="fas fa-play"></i></button>
+      {% endif %}
+      {% if button == 'stop'%}
+      <button type="submit" class="btn btn-dark btn-circle btn-xl" id='clear' name="stop" value=1><i class="fas fa-stop"></i></button>
+      {% endif %}
+      <!--<input type="submit" value="Submit">-->
+      </form>
+    </div>
+
+
+  </div>
+</body>
+
+<script src="https://code.jquery.com/jquery-3.3.1.slim.min.js" integrity="sha384-q8i/X+965DzO0rT7abK41JStQIAqVgRVzpbzo5smXKp4YfRvH+8abtTE1Pi6jizo" crossorigin="anonymous"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.14.7/umd/popper.min.js" integrity="sha384-UO2eT0CpHqdSJQ6hJty5KVphtPhzWj9WO1clHTMGa3JDZwrnQq4sF86dIHNDz0W1" crossorigin="anonymous"></script>
+<script src="{{ url_for('static', filename='js/index.js') }}"></script>
 </html>
+

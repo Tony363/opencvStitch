@@ -72,7 +72,7 @@ class CSI_Camera:
             # Grab the first frame to start the video capturing
             self.grabbed, self.frame = self.video_capture.read()
             # If the video is a file (interface == "none") the video must be manually resized before stitch
-            if self.interface == "none":
+            if self.interface == "none" and self.grabbed:
                 self.frame = imutils.resize(self.frame, self.capture_width)
             
     def start(self):
@@ -97,10 +97,10 @@ class CSI_Camera:
             try:
                 grabbed, frame = self.video_capture.read()
 
-                # If the video is a file (interface == "none") the video must be manually resized before stitch
-                if self.interface == "none":
-                    frame = imutils.resize(frame, self.capture_width)
                 if grabbed:
+                    # If the video is a file (interface == "none") the video must be manually resized before stitch
+                    if self.interface == "none":
+                        frame = imutils.resize(frame, self.capture_width)
                     with self.read_lock:
                         self.grabbed=grabbed
                         self.frame=frame
@@ -132,6 +132,7 @@ class Panorama:
         self.status = None
         self.pano = None
         self.save = save
+        self.out = None # Video writer
         self.out_path = out_path
         
         # Initialize Stitcher class
@@ -202,9 +203,10 @@ class Panorama:
                                 capL = self.left_camera.video_capture
                                 capR = self.right_camera.video_capture
                                 h,w = cv2.UMat.get(pano).shape[:2] # Convert UMat to numpy array
-                                fps = min(capL.get(cv2.CAP_PROP_FPS),capR.get(cv2.CAP_PROP_FPS))
+                                #fps = min(capL.get(cv2.CAP_PROP_FPS),capR.get(cv2.CAP_PROP_FPS))
+                                fps = 30 
                                 fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-                                out = cv2.VideoWriter(self.out_path,fourcc,fps,(w,h))
+                                self.out = cv2.VideoWriter(self.out_path,fourcc,fps,(w,h))
                                 print(CODES.INFO, "Video Writer initialized with {:.1f} fps and shape {}x{}".format(fps,w,h))
                             
                             print(CODES.INFO, "Initial left/right frame shape : {}x{}".format(left_image.shape[1],left_image.shape[0]))
@@ -226,8 +228,8 @@ class Panorama:
 
                         print(CODES.INFO,"Stitching completed successfully ({}/{}). Done in {:.3f}s".format(self.stitched_frames + 1,self.stop_frame,timer(stitch_start_time)))
                         readFrame += 1
-                        if self.save:
-                            out.write(pano)
+                        if self.save and self.out is not None:
+                            self.out.write(pano)
 
                         with self.read_lock:
                             self.status=status
@@ -251,6 +253,8 @@ class Panorama:
 
     def stop(self):
         self.running=False
+        if self.out is not None:
+            self.out.release()
         self.read_thread.join()
         print(CODES.INFO, "Video stitching thread quit.")
 

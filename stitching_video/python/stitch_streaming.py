@@ -13,7 +13,8 @@ Left, right and stitched videos are displayed as preview and the user can start 
 import cv2
 import time
 import threading
-from flask import Response, Flask, render_template
+from flask import Response, Flask, render_template,redirect, request, url_for
+from flask_fontawesome import FontAwesome
 import argparse
 
 
@@ -36,6 +37,8 @@ modes = (cv2.Stitcher_PANORAMA, cv2.Stitcher_SCANS)
 
 # Create the Flask object for the application
 app = Flask(__name__)
+fa = FontAwesome(app)
+
 
 def captureFrames():
     global video_frame, thread_lock
@@ -135,10 +138,29 @@ def encodeStitchedFrame():
 
 
 
-@app.route("/")
+@app.route("/", methods=['GET','POST'])
 def index():
-    return render_template('index.html')
+    if request.method == 'GET':
+        return render_template('index.html', button='play')
+    elif request.method == 'POST':
+        
+        req = request.form
+        if req.get('play') == '1':
+            print("Play pressed.")
+            if stitching_video.final_camera is not None:
+                stitching_video.final_camera.save = True
+                stitching_video.final_camera.to_estimate = True
+                button = 'stop'
+        elif req.get('stop') == '1':
+            print("Stop pressed.")
+            stitching_video.final_camera.save = False
+            stitching_video.final_camera.out.release()
+            button = 'play'
+        return render_template('index.html', button=button)
     #return Response(encodeLeftFrame(), mimetype = "multipart/x-mixed-replace; boundary=frame")
+
+
+
 
 @app.route("/left")
 def left():
@@ -192,7 +214,7 @@ def read_args():
 
 # check to see if this is the main thread of execution
 # ex usage(local) : python3 stitch_streaming.py --interface none --videos ../inputs/left.mp4 ../inputs/right.mp4 --capture_width 640 --capture_height 480
-# ex usage (jetson nx) : python3 stitch_streaming.py --capture_width 640 --capture_height 480 --device0 0 --device1 1 --view
+# ex usage (jetson nx) : python3 stitch_streaming.py --capture_width 640 --capture_height 480 --interface usb --device0 0 --device1 1 --view
 
 if __name__ == '__main__':
     # Read args
