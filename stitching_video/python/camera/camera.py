@@ -4,7 +4,9 @@ import time
 import sys
 import imutils
 import numpy as np
+import collections
 
+from math import ceil
 from utils import *
 
 
@@ -134,7 +136,9 @@ class Panorama:
         self.save = save
         self.out = None # Video writer
         self.out_path = out_path
-        
+        self.fps_array = collections.deque(maxlen=5) # Store processing time for last 5 frames to estimate video writer FPS
+
+
         # Initialize Stitcher class
         self.stitcher = cv2.Stitcher.create(cv2.Stitcher_PANORAMA)
         self.imgs = []
@@ -205,7 +209,7 @@ class Panorama:
                                 h,w = cv2.UMat.get(pano).shape[:2] # Convert UMat to numpy array
                                 
                                 #fps = min(capL.get(cv2.CAP_PROP_FPS),capR.get(cv2.CAP_PROP_FPS))
-                                fps = 30 
+                                fps = ceil(np.mean(self.fps_array))
                                 fourcc = cv2.VideoWriter_fourcc(*'mp4v')
                                 
                                 output_path = "outputs/"
@@ -231,8 +235,11 @@ class Panorama:
                                 print(CODES.ERROR, "composePanorama failed.") 
                                 continue
                             
-
-                        print(CODES.INFO,"Stitching completed successfully ({}/{}). Done in {:.3f}s. {}".format(self.stitched_frames + 1,self.stop_frame,timer(stitch_start_time), "SAVED" if self.save else ""))
+                        
+                        excution_time = timer(stitch_start_time)
+                        print(CODES.INFO,"Stitching completed successfully ({}/{}). Done in {:.3f}s. {}".format(self.stitched_frames + 1,self.stop_frame,excution_time, "SAVED" if self.save else ""))
+                        
+                        self.fps_array.append(1/excution_time)
                         readFrame += 1
                         if self.save and self.out is not None:
                             self.out.write(pano)

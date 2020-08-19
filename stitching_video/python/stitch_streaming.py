@@ -214,7 +214,9 @@ def read_args():
 
 # check to see if this is the main thread of execution
 # ex usage(local) : python3 stitch_streaming.py --interface none --videos ../inputs/left.mp4 ../inputs/right.mp4 --capture_width 640 --capture_height 480
-# ex usage (jetson nx) : python3 stitch_streaming.py --capture_width 640 --capture_height 480 --interface usb --device0 0 --device1 1 --view
+# ex usage (jetson nx , small) : python3 stitch_streaming.py --capture_width 640 --capture_height 480 --interface usb --device0 0 --device1 1 --view
+# ex usage (jetson nx, 4K) : python3 stitch_streaming.py --capture_width 3840 --capture_height 2160 --interface usb --device0 0 --device1 1 
+
 
 if __name__ == '__main__':
     # Read args
