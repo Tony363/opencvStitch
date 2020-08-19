@@ -203,10 +203,16 @@ class Panorama:
                                 capL = self.left_camera.video_capture
                                 capR = self.right_camera.video_capture
                                 h,w = cv2.UMat.get(pano).shape[:2] # Convert UMat to numpy array
+                                
                                 #fps = min(capL.get(cv2.CAP_PROP_FPS),capR.get(cv2.CAP_PROP_FPS))
                                 fps = 30 
                                 fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-                                self.out = cv2.VideoWriter(self.out_path,fourcc,fps,(w,h))
+                                
+                                output_path = "outputs/"
+                                timestamp = time.strftime('%b-%d-%Y_%H%M%S', time.localtime())
+                                timestamp += ".mp4"
+                                output_path+= timestamp
+                                self.out = cv2.VideoWriter(output_path,fourcc,fps,(w,h))
                                 print(CODES.INFO, "Video Writer initialized with {:.1f} fps and shape {}x{}".format(fps,w,h))
                             
                             print(CODES.INFO, "Initial left/right frame shape : {}x{}".format(left_image.shape[1],left_image.shape[0]))
@@ -226,7 +232,7 @@ class Panorama:
                                 continue
                             
 
-                        print(CODES.INFO,"Stitching completed successfully ({}/{}). Done in {:.3f}s".format(self.stitched_frames + 1,self.stop_frame,timer(stitch_start_time)))
+                        print(CODES.INFO,"Stitching completed successfully ({}/{}). Done in {:.3f}s. {}".format(self.stitched_frames + 1,self.stop_frame,timer(stitch_start_time), "SAVED" if self.save else ""))
                         readFrame += 1
                         if self.save and self.out is not None:
                             self.out.write(pano)

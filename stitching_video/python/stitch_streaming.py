@@ -133,7 +133,7 @@ def encodeStitchedFrame():
         
         # Output image as a byte array
         yield(b'--frame\r\n'b'Content-Type: image/jpeg\r\n\r\n' + 
-            encoded_image.tobytes() + b'\r\n')
+            encoded_image.tobytes() + b'\r\n\r\n')
 
 
 
