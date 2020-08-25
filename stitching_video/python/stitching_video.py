@@ -44,29 +44,16 @@ def read_vid_thread(stitcher,interface,device0,device1,capture_width, capture_he
     total time (4K) : 500ms
     compose_time (4K) : 500ms
     """
+    global left_camera, right_camera, left_image, right_image, final_camera, pano
+    left_camera = CSI_Camera(interface, capture_width, capture_height)
+    right_camera = CSI_Camera(interface, capture_width, capture_height)
     if interface == "GPU" and videos is not None:
         print('interface detected')
         left_camera = UMatFileVideoStream(videos[0],selectionRate)
         right_camera = UMatFileVideoStream(videos[1],selectionRate)
-        rgb = cv2.UMat(720,1080,cv2.CV_8UC3)
-        while not (left_camera.stopped and right_camera.stopped):
-            Lret,Rret = left_camera.more(),right_camera.more()
-            Lframe,Rframe = left_camera.read(),right_camera.read()
-            if Lret and Rret:
-                print(Lframe,Rframe)
-                cv2.imshow('test1',Lframe)
-                cv2.imshow('test2',Rframe)
-                if cv2.waitKey(1) & 0xFF == ord('q'):
-                    left_camera.stop()
-                    right_camera.stop()
-            
-
-    # global left_camera, right_camera, left_image, right_image, final_camera, pano
-    left_camera = CSI_Camera(interface, capture_width, capture_height)
-    right_camera = CSI_Camera(interface, capture_width, capture_height)
 
     # Use offline videos file
-    if interface=="none" and videos is not None:
+    elif interface=="none" and videos is not None:
         left_camera.open(interface,videos[0],capture_width, capture_height)
         right_camera.open(interface,videos[1],capture_width, capture_height)
 
@@ -92,21 +79,22 @@ def read_vid_thread(stitcher,interface,device0,device1,capture_width, capture_he
         left_camera.open(interface,device0,capture_width, capture_height)
         right_camera.open(interface,device1,capture_width, capture_height)
     # elif interface == "GPU" and videos is not None:
-    #     left_camera.open(interface,videos[0],capture_width,capture_height)
-    #     right_camera.open(interface,videos[1],capture_width,capture_height)
+        # left_camera.open(interface,videos[0],capture_width,capture_height)
+        # right_camera.open(interface,videos[1],capture_width,capture_height)
     else:
         print(CODES.ERROR,"Interface does not exist or devices/videos do not match with the interface")
         SystemExit(0)
 
-    if interface != "GPU":
-        left_camera.start()
-        right_camera.start()
-
-    # Initialize Panorama class
-    final_camera = Panorama(left_camera, right_camera,stop_frame,SAVE, OUT_PATH, DISPLAY_TIMER)
-    if interface != "GPU":
+    left_camera.start()
+    right_camera.start()
+    
+    if interface == "GPU":
+        final_camera = Panorama(left_camera, right_camera,stop_frame,SAVE, OUT_PATH, DISPLAY_TIMER,interface)
         final_camera.start()
-
+    else:
+         # Initialize Panorama class
+        final_camera = Panorama(left_camera, right_camera,stop_frame,SAVE, OUT_PATH, DISPLAY_TIMER)
+        final_camera.start()
         if (not left_camera.video_capture.isOpened()
             or not right_camera.video_capture.isOpened()):
             # Cameras did not open, or no camera attached
@@ -115,11 +103,15 @@ def read_vid_thread(stitcher,interface,device0,device1,capture_width, capture_he
 
 
     while True:
-        _ , left_image=left_camera.read()
-        _ , right_image=right_camera.read()
+        if interface == "GPU":
+            Lret,Rret = left_camera.more(),right_camera.more()
+            left_image,right_image = left_camera.read(),right_camera.read()
+        else:
+            _ , left_image=left_camera.read()
+            _ , right_image=right_camera.read()
         
         input_display_time = timer() 
-        if view:
+        if view and interface != "GPU":
             camera_images = np.hstack((left_image, right_image)) #70 ms on 4K, 7ms on width 640
             camera_images = imutils.resize(camera_images, width = display_width)
             cv2.imshow("Left/Right Cameras", camera_images)
