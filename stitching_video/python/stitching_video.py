@@ -19,7 +19,7 @@ import sys
 from utils import *
 from camera.camera import CSI_Camera,Panorama, get_minimum_total_frame, status_check
 from camera.gstreamer import gstreamer_pipeline
-
+from UMatFileVideoStream import UMatFileVideoStream
 
 # Stitching variables
 left_camera = None
@@ -37,15 +37,31 @@ OUT_PATH = "result.mp4"
 DISPLAY_TIMER = False
 
 
-def read_vid_thread(stitcher,interface,device0,device1,capture_width, capture_height,videos,stop_frame = None,view=False, display_width=1080):
+def read_vid_thread(stitcher,interface,device0,device1,capture_width, capture_height,videos,stop_frame = None,view=False, display_width=1080,selectionRate=1000):
     """
     This read_vid function will display the left/right frames, the result panorama in the same thread
     BUT the stitching is done separetely in another thread
     total time (4K) : 500ms
     compose_time (4K) : 500ms
     """
-    
-    global left_camera, right_camera, left_image, right_image, final_camera, pano
+    if interface == "GPU" and videos is not None:
+        print('interface detected')
+        left_camera = UMatFileVideoStream(videos[0],selectionRate)
+        right_camera = UMatFileVideoStream(videos[1],selectionRate)
+        rgb = cv2.UMat(720,1080,cv2.CV_8UC3)
+        while not (left_camera.stopped and right_camera.stopped):
+            Lret,Rret = left_camera.more(),right_camera.more()
+            Lframe,Rframe = left_camera.read(),right_camera.read()
+            if Lret and Rret:
+                print(Lframe,Rframe)
+                cv2.imshow('test1',Lframe)
+                cv2.imshow('test2',Rframe)
+                if cv2.waitKey(1) & 0xFF == ord('q'):
+                    left_camera.stop()
+                    right_camera.stop()
+            
+
+    # global left_camera, right_camera, left_image, right_image, final_camera, pano
     left_camera = CSI_Camera(interface, capture_width, capture_height)
     right_camera = CSI_Camera(interface, capture_width, capture_height)
 
@@ -75,23 +91,27 @@ def read_vid_thread(stitcher,interface,device0,device1,capture_width, capture_he
     elif interface=="usb" and device0 is not None and device1 is not None:
         left_camera.open(interface,device0,capture_width, capture_height)
         right_camera.open(interface,device1,capture_width, capture_height)
+    # elif interface == "GPU" and videos is not None:
+    #     left_camera.open(interface,videos[0],capture_width,capture_height)
+    #     right_camera.open(interface,videos[1],capture_width,capture_height)
     else:
         print(CODES.ERROR,"Interface does not exist or devices/videos do not match with the interface")
         SystemExit(0)
 
-
-    left_camera.start()
-    right_camera.start()
+    if interface != "GPU":
+        left_camera.start()
+        right_camera.start()
 
     # Initialize Panorama class
     final_camera = Panorama(left_camera, right_camera,stop_frame,SAVE, OUT_PATH, DISPLAY_TIMER)
-    final_camera.start()
+    if interface != "GPU":
+        final_camera.start()
 
-    if (not left_camera.video_capture.isOpened()
-        or not right_camera.video_capture.isOpened()):
-        # Cameras did not open, or no camera attached
-        print("Unable to open any cameras")
-        SystemExit(0)
+        if (not left_camera.video_capture.isOpened()
+            or not right_camera.video_capture.isOpened()):
+            # Cameras did not open, or no camera attached
+            print("Unable to open any cameras")
+            SystemExit(0)
 
 
     while True:
@@ -111,7 +131,6 @@ def read_vid_thread(stitcher,interface,device0,device1,capture_width, capture_he
         if pano is not None and view:
             pano = imutils.resize(pano, width = display_width)
             cv2.imshow("Stitched view", pano)
-
 
             wait_key_time = timer()
             keyCode = cv2.waitKey(30) & 0xFF
@@ -186,28 +205,23 @@ def read_vid(stitcher,interface,device0,device1,capture_width,capture_height,vid
     left_camera.start()
     right_camera.start()
 
-
-
     if (not left_camera.video_capture.isOpened()
         or not right_camera.video_capture.isOpened()):
         # Cameras did not open, or no camera attached
         print("Unable to open any cameras")
         SystemExit(0)
 
-
     # Set a maximum number of frames to write in the output video object
     # By default, the smallest total frames count among the two videos is assigned to stop_frame
     if stop_frame is None:
         stop_frame = get_minimum_total_frame(left_camera.video_capture,right_camera.video_capture)
-
 
     # NB : cv2.UMat array is faster than np array
     pano = cv2.UMat(np.asarray([]))
     readFrame = 0
     execution_time = timer()
 
-    while True:
-       
+    while True:  
         start_time = timer()
         Lret , left_frame=left_camera.read()
         Rret , right_frame=right_camera.read()
@@ -259,8 +273,6 @@ def read_vid(stitcher,interface,device0,device1,capture_width,capture_height,vid
                     print(CODES.INFO, "Successfully quit the program.")
                     break
                 
-                
-
             print(CODES.INFO, "{}/{} Stitched successfully. Done in {:.3f}s".format(readFrame, stop_frame,timer(start_time)))
             if SAVE:
                 out.write(pano)

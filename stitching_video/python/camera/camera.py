@@ -6,9 +6,12 @@ import imutils
 import numpy as np
 import collections
 
+from os import path
+sys.path.append(path.dirname(path.dirname(__file__)))
+
 from math import ceil
 from utils import *
-
+from UMatFileVideoStream import UMatFileVideoStream
 
 class CSI_Camera:
 
@@ -31,8 +34,9 @@ class CSI_Camera:
     # Open CSI-cameras with GStreamer
     # for mipi, filename is the gstreamer pipeline string returned by gstreamer.py
     # for usb, filename is the camera device ID (0 or 1)
-    def open(self, interface, filename, capture_width, capture_height):
+    def open(self, interface, filename, capture_width, capture_height,selectionRate=1000):
         if interface  == "mipi":
+            print("mipi",'\n')
             try:
                 self.video_capture = cv2.VideoCapture(
                     filename, cv2.CAP_GSTREAMER
@@ -48,6 +52,7 @@ class CSI_Camera:
             self.grabbed, self.frame = self.video_capture.read()
 
         elif interface == "usb" or interface == "none":
+            print("None",'\n')
             try:
                 if interface == "none":
                     self.video_capture = cv2.VideoCapture(filename)
@@ -76,6 +81,19 @@ class CSI_Camera:
             # If the video is a file (interface == "none") the video must be manually resized before stitch
             if self.interface == "none" and self.grabbed:
                 self.frame = imutils.resize(self.frame, self.capture_width)
+        # push to GPU        
+        elif interface == "GPU":
+            # print('GPU','\n')
+            try:
+                # UMat video stream
+                self.video_capture = UMatFileVideoStream(filename,selectionRate).start()
+            except RuntimeError:
+                self.video_capture = None
+                print("Unable to access GPU")
+                print("Pipeline: " + filename)
+                return
+            # # access bool and frame from UMatFileVideoStream object more and read
+            # self.grabbed,self.frame = self.video_capture.more(),self.video_capture.read()
             
     def start(self):
         if self.running:
@@ -112,7 +130,9 @@ class CSI_Camera:
         # Something bad happened
         
 
-    def read(self):
+    def read(self,interface="GPU"):
+        if interface == "GPU":
+            return self.grabbed,self.frame
         with self.read_lock:
             frame = self.frame.copy()
             grabbed=self.grabbed
