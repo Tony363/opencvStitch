@@ -11,7 +11,7 @@ sys.path.append(path.dirname(path.dirname(__file__)))
 
 from math import ceil
 from utils import *
-from UMatFileVideoStream import UMatFileVideoStream
+# from UMatFileVideoStream import UMatFileVideoStream
 
 class CSI_Camera:
 

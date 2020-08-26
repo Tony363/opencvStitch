@@ -78,9 +78,6 @@ def read_vid_thread(stitcher,interface,device0,device1,capture_width, capture_he
     elif interface=="usb" and device0 is not None and device1 is not None:
         left_camera.open(interface,device0,capture_width, capture_height)
         right_camera.open(interface,device1,capture_width, capture_height)
-    # elif interface == "GPU" and videos is not None:
-        # left_camera.open(interface,videos[0],capture_width,capture_height)
-        # right_camera.open(interface,videos[1],capture_width,capture_height)
     else:
         print(CODES.ERROR,"Interface does not exist or devices/videos do not match with the interface")
         SystemExit(0)
