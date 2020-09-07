@@ -49,8 +49,8 @@ def read_vid_thread(stitcher,interface,device0,device1,capture_width, capture_he
     right_camera = CSI_Camera(interface, capture_width, capture_height)
     if interface == "GPU" and videos is not None:
         print('interface detected')
-        left_camera = UMatFileVideoStream(videos[0],selectionRate)
-        right_camera = UMatFileVideoStream(videos[1],selectionRate)
+        left_camera.open(interface,videos[0],capture_width,capture_height)
+        right_camera.open(interface,vidoes[1],capture_width,capture_height)
 
     # Use offline videos file
     elif interface=="none" and videos is not None:
@@ -100,12 +100,8 @@ def read_vid_thread(stitcher,interface,device0,device1,capture_width, capture_he
 
 
     while True:
-        if interface == "GPU":
-            Lret,Rret = left_camera.more(),right_camera.more()
-            left_image,right_image = left_camera.read(),right_camera.read()
-        else:
-            _ , left_image=left_camera.read()
-            _ , right_image=right_camera.read()
+        _ , left_image=left_camera.read()
+        _ , right_image=right_camera.read()
         
         input_display_time = timer() 
         if view and interface != "GPU":

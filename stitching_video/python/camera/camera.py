@@ -103,7 +103,6 @@ class CSI_Camera:
         while self.running:
             try:
                 grabbed, frame = self.video_capture.read()
-
                 if grabbed:
                     # If the video is a file (interface == "none") the video must be manually resized before stitch
                     if self.interface == "none":
@@ -142,7 +141,7 @@ class Panorama:
         self.out = None # Video writer
         self.out_path = out_path
         self.fps_array = collections.deque(maxlen=5) # Store processing time for last 5 frames to estimate video writer FPS
-        self.GPU = interface
+        self.GPU = cv2.cuda_GpuMat()
 
         # Initialize Stitcher class
         self.stitcher = cv2.Stitcher.create(cv2.Stitcher_PANORAMA)
@@ -186,20 +185,16 @@ class Panorama:
     # Thread that stitches frames
     def stitchCamera(self):
             # NB : cv2.UMat array is faster than np array
-            pano = cv2.UMat(np.asarray([]))
+            pano = cv2.cuda_GpuMat(np.asarray([]))
             readFrame = 0
             while self.running:
-                
                 try:
                     # Initialize left and right frames
                     # CSI cameras frames works on 30 or 60 FPS but the sticher works under 3FPS (slower)
                     # Therefore it needs to store a frame for a longer period of time to be able to stitch
                     # if (self.left_camera.frame is not None and self.right_camera.frame is not None) or self.GPU:
                     if (self.left_camera and self.right_camera):
-                        if self.GPU == "GPU":
-                            Lret,Rret = self.left_camera.more(),self.right_camera.more()
-                            left_image,right_image = self.left_camera.read(),self.right_camera.read()
-                        elif (self.left_camera.frame is not None and self.right_camera.frame is not None):
+                        if (self.left_camera.frame is not None and self.right_camera.frame is not None):
                             _, left_image = self.left_camera.read()
                             _, right_image = self.right_camera.read()
 
@@ -217,13 +212,12 @@ class Panorama:
 
                             # Initialize the video writer object
                             if self.save:
-                                if not self.GPU:
-                                    capL = self.left_camera.video_capture
-                                    capR = self.right_camera.video_capture
-                                h,w = cv2.UMat.get(pano).shape[:2] # Convert UMat to numpy array
-                                
-                                #fps = min(capL.get(cv2.CAP_PROP_FPS),capR.get(cv2.CAP_PROP_FPS))
-                                fps = ceil(np.mean(self.fps_array))
+                                capL = self.left_camera.video_capture
+                                capR = self.right_camera.video_capture
+                                h,w = pano.download().shape[:2]
+				#h,w = cv2.UMat.get(pano).shape[:2] # Convert UMat to numpy array
+                                fps = min(capL.get(cv2.CAP_PROP_FPS),capR.get(cv2.CAP_PROP_FPS))
+                                #fps = ceil(np.mean(self.fps_array))
                                 fourcc = cv2.VideoWriter_fourcc(*'mp4v')
                                 
                                 output_path = "outputs/"
@@ -232,9 +226,6 @@ class Panorama:
                                 output_path+= timestamp
                                 self.out = cv2.VideoWriter(output_path,fourcc,fps,(w,h))
                                 print(CODES.INFO, "Video Writer initialized with {:.1f} fps and shape {}x{}".format(fps,w,h))
-                            
-                            if self.GPU == "GPU":
-                                print(CODES.INFO, "Initial left/right frame shape : {}x{}".format(left_image.get().shape[1],left_image.get().shape[0]))
                             else:
                                 print(CODES.INFO, "Initial left/right frame shape : {}x{}".format(left_image.shape[1],left_image.shape[0]))
                         
@@ -274,7 +265,7 @@ class Panorama:
     def read(self):
         if self.pano is not None:
             with self.read_lock:
-                pano = cv2.UMat.get(self.pano).copy()
+                pano = self.pano
                 status = self.status
             return status, pano 
         else:
