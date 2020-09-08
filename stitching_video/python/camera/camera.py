@@ -208,8 +208,8 @@ class Panorama:
                                 capR = self.right_camera.video_capture
                                 h,w = cv2.UMat.get(pano).shape[:2] # Convert UMat to numpy array
                                 
-                                #fps = min(capL.get(cv2.CAP_PROP_FPS),capR.get(cv2.CAP_PROP_FPS))
-                                fps = ceil(np.mean(self.fps_array))
+                                fps = min(capL.get(cv2.CAP_PROP_FPS),capR.get(cv2.CAP_PROP_FPS))
+                                #fps = ceil(np.mean(self.fps_array))
                                 fourcc = cv2.VideoWriter_fourcc(*'mp4v')
                                 
                                 output_path = "outputs/"
