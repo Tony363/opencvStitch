@@ -114,7 +114,8 @@ class CSI_Camera:
                     # If the video is a file (interface == "none") the video must be manually resized before stitch
                     if self.interface == "none":
                         frame = imutils.resize(self.GPU.download(), self.capture_width)
-                 
+                    else:
+                        frame = self.GPU.download()                 
                     with self.read_lock:
                         self.grabbed=grabbed
                         self.frame=frame
@@ -197,10 +198,9 @@ class Panorama:
                     # CSI cameras frames works on 30 or 60 FPS but the sticher works under 3FPS (slower)
                     # Therefore it needs to store a frame for a longer period of time to be able to stitch
                     # if (self.left_camera.frame is not None and self.right_camera.frame is not None) or self.GPU:
-                    if (self.left_camera and self.right_camera):
-                        if (self.left_camera.frame is not None and self.right_camera.frame is not None):
-                            _, left_image = self.left_camera.read()
-                            _, right_image = self.right_camera.read()
+                    if (self.left_camera.frame is not None and self.right_camera.frame is not None):
+                        _, left_image = self.left_camera.read()
+                        _, right_image = self.right_camera.read()
 
                         stitch_start_time = time.time()
                     
@@ -256,11 +256,11 @@ class Panorama:
                         self.fps_array.append(1/excution_time)
                         readFrame += 1
                         if self.save and self.out is not None:
-                            self.out.write(pano)
+                            self.out.write(self.GPU.download())
 
                         with self.read_lock:
                             self.status=status
-                            self.pano=pano
+                            self.pano=self.GPU.download()
                             self.stitched_frames += 1
 
                 except RuntimeError:
