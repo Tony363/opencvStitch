@@ -1,5 +1,5 @@
 # import the necessary packages
-from Stitcher_class import Manual
+from utils import Manual
 import argparse
 import imutils
 import cv2
@@ -15,15 +15,14 @@ args = vars(ap.parse_args())
 # (for faster processing)
 imageA = cv2.imread(args["first"])
 imageB = cv2.imread(args["second"])
-imageA = imutils.resize(imageA, width=400)
-imageB = imutils.resize(imageB, width=400)
+imageA = imutils.resize(imageA, width=1080)
+imageB = imutils.resize(imageB, width=1080)
 # stitch the images together to create a panorama
 stitcher = Manual()
-result = stitcher.stitch([imageA, imageB], showMatches=False)
-print(type(result))
+status, result = stitcher.stitch([imageA, imageB])
+result = imutils.resize(result,width=2160)
 # show the images
 cv2.imshow("Image A", imageA)
 cv2.imshow("Image B", imageB)
-# cv2.imshow("Keypoint Matches", vis)
 cv2.imshow("Result", result)
 cv2.waitKey(0)

@@ -47,13 +47,8 @@ def read_vid_thread(stitcher,interface,device0,device1,capture_width, capture_he
     global left_camera, right_camera, left_image, right_image, final_camera, pano
     left_camera = CSI_Camera(interface, capture_width, capture_height)
     right_camera = CSI_Camera(interface, capture_width, capture_height)
-    if interface == "GPU" and videos is not None:
-        print('interface detected')
-        left_camera.open(interface,videos[0],capture_width,capture_height)
-        right_camera.open(interface,vidoes[1],capture_width,capture_height)
-
     # Use offline videos file
-    elif interface=="none" and videos is not None:
+    if interface=="none" and videos is not None:
         left_camera.open(interface,videos[0],capture_width, capture_height)
         right_camera.open(interface,videos[1],capture_width, capture_height)
 
@@ -84,19 +79,15 @@ def read_vid_thread(stitcher,interface,device0,device1,capture_width, capture_he
 
     left_camera.start()
     right_camera.start()
-    
-    if interface == "GPU":
-        final_camera = Panorama(left_camera, right_camera,stop_frame,SAVE, OUT_PATH, DISPLAY_TIMER,interface)
-        final_camera.start()
-    else:
-         # Initialize Panorama class
-        final_camera = Panorama(left_camera, right_camera,stop_frame,SAVE, OUT_PATH, DISPLAY_TIMER)
-        final_camera.start()
-        if (not left_camera.video_capture.isOpened()
-            or not right_camera.video_capture.isOpened()):
-            # Cameras did not open, or no camera attached
-            print("Unable to open any cameras")
-            SystemExit(0)
+
+    # Initialize Panorama class
+    final_camera = Panorama(left_camera, right_camera,stop_frame,SAVE, OUT_PATH, DISPLAY_TIMER)
+    final_camera.start()
+    if (not left_camera.video_capture.isOpened()
+        or not right_camera.video_capture.isOpened()):
+        # Cameras did not open, or no camera attached
+        print("Unable to open any cameras")
+        SystemExit(0)
 
 
     while True:
@@ -126,11 +117,11 @@ def read_vid_thread(stitcher,interface,device0,device1,capture_width, capture_he
                 break
 
             elif keyCode == ord('e'):
-                    print(CODES.INFO, "'e' was pressed. ESTIMATING THE TRANSFORM ...")
-                    if SAVE is False:
-                        final_camera.to_estimate = True
-                    else:
-                        print(CODES.ERROR, "Cannot estimate new transform if the output is saved")
+                print(CODES.INFO, "'e' was pressed. ESTIMATING THE TRANSFORM ...")
+                if SAVE is False:
+                    final_camera.to_estimate = True
+                else:
+                    print(CODES.ERROR, "Cannot estimate new transform if the output is saved")
 
         timer(pano_display_time,"pano_display_time",DISPLAY_TIMER)
 

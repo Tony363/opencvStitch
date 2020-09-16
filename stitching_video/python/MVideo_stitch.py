@@ -21,13 +21,14 @@ while True:
     ret,left = leftStream.read()
     ret,right = rightStream.read()
     # resize the frames
-    left = imutils.resize(left, width=400)
-    right = imutils.resize(right, width=400)
+    left = imutils.resize(left, width=1080)
+    right = imutils.resize(right, width=1080)
     # stitch the frames together to form the panorama
     # IMPORTANT: you might have to change this line of code
     # depending on how your cameras are oriented; frames
     # should be supplied in left-to-right order
     status,result = stitcher.stitch([left, right])
+    result = imutils.resize(result,width=1080)
     # no homograpy could be computed
     if result is None:
         print("[INFO] homography could not be computed")
@@ -41,7 +42,7 @@ while True:
     # cv2.putText(result, ts, (10, result.shape[0] - 10),
     #     cv2.FONT_HERSHEY_SIMPLEX, 0.35, (0, 0, 255), 1)
     # show the output images
-    cv2.imshow("Result", cv2.UMat(result))
+    cv2.imshow("Result", result)
     cv2.imshow("Left Frame", left)
     cv2.imshow("Right Frame", right)
     key = cv2.waitKey(1) & 0xFF
