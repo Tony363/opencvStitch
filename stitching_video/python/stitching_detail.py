@@ -13,6 +13,7 @@ from collections import OrderedDict
 
 import cv2 as cv
 import numpy as np
+import faulthandler; faulthandler.enable()
 
 EXPOS_COMP_CHOICES = OrderedDict()
 EXPOS_COMP_CHOICES['gain_blocks'] = cv.detail.ExposureCompensator_GAIN_BLOCKS
@@ -159,7 +160,12 @@ def arguments():
     )
     return parser,parser.parse_args()
 
-
+def Kseam_work_aspect(K,seam_work_aspect):
+    K[0, 0] *= seam_work_aspect
+    K[0, 2] *= seam_work_aspect
+    K[1, 1] *= seam_work_aspect
+    K[1, 2] *= seam_work_aspect
+    return K
 
 
 def get_matcher(args):
@@ -195,7 +201,7 @@ def get_compensator(args):
     return compensator
 
 
-def main(left_image,right_image):
+def main(left_image,right_image,args):
     img_names = np.asarray([left_image,right_image])
     work_megapix = 0.6
     seam_megapix = 0.1
@@ -203,60 +209,32 @@ def main(left_image,right_image):
     conf_thresh = 1.0
     ba_refine_mask = 'xxxxx'
     wave_correct = 'vert'
-    do_wave_correct = True
+    # do_wave_correct = True
     warp_type = 'spherical'
     blend_type = 'no'
     result_name = 'result.jpg'
-   
     timelapse = False
     finder = cv.xfeatures2d_SURF.create() #fast = cv2.FastFeatureDetector_create()
-    seam_work_aspect = 1
-    full_img_sizes = []
-    features = []
-    images = []
     is_work_scale_set = False
     is_seam_scale_set = False
     is_compose_scale_set = False
-    for name in img_names:
-        full_img_sizes.append((name.shape[1], name.shape[0]))
-        work_scale = min(1.0, np.sqrt(work_megapix * 1e6 / (name.shape[0] * name.shape[1])))
-        img = cv.resize(src=name, dsize=None, fx=work_scale, fy=work_scale, interpolation=cv.INTER_LINEAR_EXACT)   
-        seam_scale = min(1.0, np.sqrt(seam_megapix * 1e6 / (name.shape[0] * name.shape[1])))
-        seam_work_aspect = seam_scale / work_scale
-        img_feat = cv.detail.computeImageFeatures2(finder, img)
-        features.append(img_feat)
-        img = cv.resize(src=name, dsize=None, fx=seam_scale, fy=seam_scale, interpolation=cv.INTER_LINEAR_EXACT)
-        images.append(img)
-
+    seam_work_aspect = 1
+    work_scale = min(1.0, np.sqrt(work_megapix * 1e6 / (left_image.shape[0] * left_image.shape[1]))) # because both image dimensions should be the same
+    seam_scale = min(1.0, np.sqrt(seam_megapix * 1e6 / (left_image.shape[0] * left_image.shape[1])))
+    seam_work_aspect = seam_scale / work_scale
+    full_img_sizes = np.asarray([(name.shape[1],name.shape[0]) for name in img_names])
+    features = np.asarray([cv.detail.computeImageFeatures2(finder,cv.resize(src=name, dsize=None, fx=work_scale, fy=work_scale, interpolation=cv.INTER_LINEAR_EXACT)) for name in img_names])
+    images = np.asarray([cv.resize(src=name, dsize=None, fx=seam_scale, fy=seam_scale, interpolation=cv.INTER_LINEAR_EXACT) for name in img_names])
     matcher = get_matcher(args)
     p = matcher.apply2(features)
     matcher.collectGarbage()
-
-    
     indices = cv.detail.leaveBiggestComponent(features, p, 0.3)
-    img_subset = []
-    img_names_subset = []
-    full_img_sizes_subset = []
-    for i in range(len(indices)):
-        img_names_subset.append(img_names[indices[i, 0]])
-        img_subset.append(images[indices[i, 0]])
-        full_img_sizes_subset.append(full_img_sizes[indices[i, 0]])
-    images = img_subset
-    img_names = img_names_subset
-    full_img_sizes = full_img_sizes_subset
-    num_images = len(img_names)
-    if num_images < 2:
-        print("Need more images")
-        exit()
-
     estimator = cv.detail_HomographyBasedEstimator()
     b, cameras = estimator.apply(features, p, None)
-    if not b:
-        print("Homography estimation failed.")
-        exit()
-    for cam in cameras:
-        cam.R = cam.R.astype(np.float32)
-
+    
+    # cameras = np.asarray([cam.R.astype(np.float32) for cam in cameras])
+    for cam in cameras:cam.R = cam.R.astype(np.float32) # need to figure out how to turn back from np to cv::detail::CameraParams object
+    
     adjuster = cv.detail_BundleAdjusterRay()
     adjuster.setConfThresh(1)
     refine_mask = np.zeros((3, 3), np.uint8)
@@ -271,59 +249,27 @@ def main(left_image,right_image):
     if ba_refine_mask[4] == 'x':
         refine_mask[1, 2] = 1
     adjuster.setRefinementMask(refine_mask)
+
     b, cameras = adjuster.apply(features, p, cameras)
-    if not b:
-        print("Camera parameters adjusting failed.")
-        exit()
-    focals = []
-    for cam in cameras:
-        focals.append(cam.focal)
-    sorted(focals)
-    if len(focals) % 2 == 1:
-        warped_image_scale = focals[len(focals) // 2]
-    else:
-        warped_image_scale = (focals[len(focals) // 2] + focals[len(focals) // 2 - 1]) / 2
-    if do_wave_correct:
-        rmats = []
-        for cam in cameras:
-            rmats.append(np.copy(cam.R))
-        rmats = cv.detail.waveCorrect(rmats, cv.detail.WAVE_CORRECT_HORIZ)
-        for idx, cam in enumerate(cameras):
-            cam.R = rmats[idx]
-    corners = []
-    masks_warped = []
-    images_warped = []
-    sizes = []
-    masks = []
-    for i in range(0, num_images):
-        um = cv.UMat(255 * np.ones((images[i].shape[0], images[i].shape[1]), np.uint8))
-        masks.append(um)
+    focals = np.asarray([cam.focal for cam in cameras]) # might need np.sort()
+    warped_image_scale = focals[len(focals) // 2] if len(focals) % 2 == 1 else (focals[len(focals) // 2] + focals[len(focals) // 2 - 1]) / 2
+    rmats = np.asarray([np.copy(cam.R)for cam in cameras])
+    rmats = cv.detail.waveCorrect(rmats, cv.detail.WAVE_CORRECT_HORIZ)
+    for idx, cam in enumerate(cameras):cam.R = rmats[idx] # need to figure out how to vectorize cameras object
 
     warper = cv.PyRotationWarper(warp_type, warped_image_scale * seam_work_aspect)  # warper could be nullptr?
-    for idx in range(0, num_images):
-        K = cameras[idx].K().astype(np.float32)
-        swa = seam_work_aspect
-        K[0, 0] *= swa
-        K[0, 2] *= swa
-        K[1, 1] *= swa
-        K[1, 2] *= swa
-        corner, image_wp = warper.warp(images[idx], K, cameras[idx].R, cv.INTER_LINEAR, cv.BORDER_REFLECT)
-        corners.append(corner)
-        sizes.append((image_wp.shape[1], image_wp.shape[0]))
-        images_warped.append(image_wp)
-        p, mask_wp = warper.warp(masks[idx], K, cameras[idx].R, cv.INTER_NEAREST, cv.BORDER_CONSTANT)
-        masks_warped.append(mask_wp.get())
-
-    images_warped_f = []
-    for img in images_warped:
-        imgf = img.astype(np.float32)
-        images_warped_f.append(imgf)
+    masks = np.asarray([cv.UMat(255 * np.ones((images[i].shape[0], images[i].shape[1]), np.uint8)) for i in range(img_names.shape[0])])
+    corners = np.asarray([warper.warp(images[idx], Kseam_work_aspect(cameras[idx].K().astype(np.float32),seam_work_aspect), cameras[idx].R, cv.INTER_LINEAR, cv.BORDER_REFLECT)[0] for idx in range(img_names.shape[0])])
+    masks_warped = np.asarray([warper.warp(masks[idx], Kseam_work_aspect(cameras[idx].K().astype(np.float32),seam_work_aspect), cameras[idx].R, cv.INTER_NEAREST, cv.BORDER_CONSTANT)[1].get() for idx in range(img_names.shape[0])])
+    images_warped = np.asarray([warper.warp(images[idx], Kseam_work_aspect(cameras[idx].K().astype(np.float32),seam_work_aspect), cameras[idx].R, cv.INTER_LINEAR, cv.BORDER_REFLECT)[1]for idx in range(img_names.shape[0])])
+    sizes = np.asarray([warper.warp(images[idx], Kseam_work_aspect(cameras[idx].K().astype(np.float32),seam_work_aspect), cameras[idx].R, cv.INTER_LINEAR, cv.BORDER_REFLECT)[1].shape[1::-1] for idx in range(img_names.shape[0])])
+    images_warped_f = np.asarray([img.astype(np.float32) for img in images_warped])
+  
 
     compensator = get_compensator(args)
-    compensator.feed(corners=corners, images=images_warped, masks=masks_warped)
-
+    compensator.feed(corners=corners.tolist(), images=images_warped, masks=masks_warped) # .tolist()
     seam_finder = SEAM_FIND_CHOICES[args.seam]
-    seam_finder.find(images_warped_f, corners, masks_warped)
+    seam_finder.find(images_warped_f, corners.tolist(), masks_warped)# .tolist()
     compose_scale = 1
     corners = []
     sizes = []
@@ -409,5 +355,5 @@ if __name__ == '__main__':
     __doc__ += '\n' + parser.format_help()
     print(__doc__)
     left_image,right_image = cv.imread(args.img_names[0]),cv.imread(args.img_names[1])
-    main(left_image,right_image)
+    main(left_image,right_image,args)
     cv.destroyAllWindows()
