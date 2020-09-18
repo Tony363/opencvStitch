@@ -13,6 +13,7 @@ from collections import OrderedDict
 
 import cv2 as cv
 import numpy as np
+import faulthandler; faulthandler.enable()
 
 EXPOS_COMP_CHOICES = OrderedDict()
 EXPOS_COMP_CHOICES['gain_blocks'] = cv.detail.ExposureCompensator_GAIN_BLOCKS
@@ -442,8 +443,10 @@ def main():
     for idx, name in enumerate(img_names):
         full_img = cv.imread(name)
         if not is_compose_scale_set:
+            print(compose_scale)
             if compose_megapix > 0:
                 compose_scale = min(1.0, np.sqrt(compose_megapix * 1e6 / (full_img.shape[0] * full_img.shape[1])))
+                print(compose_scale)
             is_compose_scale_set = True
             compose_work_aspect = compose_scale / work_scale
             warped_image_scale *= compose_work_aspect
