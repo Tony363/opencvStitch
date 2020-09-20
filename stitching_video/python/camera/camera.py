@@ -151,7 +151,6 @@ class Panorama:
         # self.GPU = cv2.cuda_GpuMat()
 
         # Initialize Stitcher class
-        # self.stitcher = cv2.Stitcher.create(cv2.Stitcher_PANORAMA)
         self.stitcher = Manual_Detailed
         self.stitcher_cached = None
         self.to_estimate = None
@@ -190,7 +189,6 @@ class Panorama:
     # Thread that stitches frames
     def stitchCamera(self):
             # NB : cv2.UMat array is faster than np array
-            # pano = cv2.UMat(np.asarray([]))
             readFrame = 0
             while self.running:
                 try:
@@ -205,27 +203,22 @@ class Panorama:
                         stitch_start_time = time.time()
                     
                         if self.stitched_frames == 0 or self.to_estimate is True:
-                            # status = self.stitcher.estimateTransform([left_image,right_image])
-                            # if status_check(status):
-                            #     print(CODES.INFO, "Transform successfully estimated")
-                            #     self.to_estimate = False
-
-                            # status,pano = self.stitcher.composePanorama([left_image,right_image],pano)
-                            # status,pano = self.stitcher.stitch([left_image,right_image])
                             status,pano,cached = self.stitcher(left_image,right_image)
-                            self.stitcher_cached = cached
                             # self.GPU.upload(pano)
-                            # if not status_check(status):
-                            #     continue
+                            self.stitcher_cached = cached
+                            if status_check(status):
+                                print(CODES.INFO, "Transform successfully estimated")
+                                self.to_estimate = False
+                            if not status_check(status):
+                                continue
 
                             # Initialize the video writer object
                             if self.save:
                                 capL = self.left_camera.video_capture
                                 capR = self.right_camera.video_capture
                                 # h,w = self.GPU.download().shape[:2]
-                                h,w = cv2.UMat.get(pano).shape[:2] # Convert UMat to numpy array
-                                #fps = min(capL.get(cv2.CAP_PROP_FPS),capR.get(cv2.CAP_PROP_FPS))
-                                fps = ceil(np.mean(self.fps_array))
+                                h,w = pano.shape[:2] # Convert UMat to numpy array
+                                fps = min(capL.get(cv2.CAP_PROP_FPS),capR.get(cv2.CAP_PROP_FPS))
                                 fourcc = cv2.VideoWriter_fourcc(*'mp4v')
                                 
                                 output_path = "outputs/"
@@ -245,10 +238,7 @@ class Panorama:
                                 break
 
                             compose_time = timer()
-                            # status, pano = self.stitcher.composePanorama([left_image,right_image],pano)
-                            # status,pano = self.stitcher.stitch([left_image,right_image])
-                            status,pano,cached = self.stitcher(left_image,right_image)
-                            # status,pano = self.stitcher(left_image,right_image,self.stitcher_cached)
+                            status,pano = self.stitcher(left_image,right_image,self.stitcher_cached)
                             # self.GPU.upload(pano)
                             timer(compose_time, "compose_time", self.timer)
                             if not status_check(status):

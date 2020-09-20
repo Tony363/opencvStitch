@@ -134,10 +134,11 @@ def Manual_Detailed(
     left_image,
     right_image,
     cached=None,
-    work_megapix=0.6,
-    seam_megapix=0.1,
+    work_megapix=1.9,
+    seam_megapix=0.01,
     ba_refine_mask='xxxxx',
-    finder=cv2.xfeatures2d_SURF.create()
+    finder=cv2.xfeatures2d_SURF.create(),
+    blender=cv2.detail.Blender_createDefault(cv2.detail.Blender_NO)
     ):
     """
     finder = cv2.xfeatures2d_SURF.create() 
@@ -147,20 +148,20 @@ def Manual_Detailed(
     finder = cv.AKAZE_create()
     finder = cv.FastFeatureDetector_create(),
     """
-    # if cached is not None:
-    #     print(len(cached))
-    #     blender,cameras,warper,compensator,corners,masks_warped = cached
-    #     for idx, name in enumerate(np.asarray([left_image,right_image])):
-    #         corner, image_warped = warper.warp(name, cameras[idx].K().astype(np.float32), cameras[idx].R, cv2.INTER_LINEAR, cv2.BORDER_REFLECT)
-    #         p, mask_warped = warper.warp(255 * np.ones((name.shape[0], name.shape[1]), np.uint8), cameras[idx].K().astype(np.float32), cameras[idx].R, cv2.INTER_NEAREST, cv2.BORDER_CONSTANT)
-    #         compensator.apply(idx, corners[idx], image_warped, mask_warped)
-    #         mask_warped = cv2.bitwise_and(cv2.resize(cv2.dilate(masks_warped[idx], None), (mask_warped.shape[1], mask_warped.shape[0]), 0, 0, cv2.INTER_LINEAR_EXACT), mask_warped)
-    #         blender.feed(cv2.UMat(image_warped.astype(np.int16)), mask_warped, corners[idx])
+    if cached is not None:
+        dst_sz,cameras,warper,compensator,corners,masks_warped = cached
+        blender.prepare(dst_sz)
+        for idx, name in enumerate(np.asarray([left_image,right_image])):
+            corner, image_warped = warper.warp(name, cameras[idx].K().astype(np.float32), cameras[idx].R, cv2.INTER_LINEAR, cv2.BORDER_REFLECT)
+            p, mask_warped = warper.warp(255 * np.ones((name.shape[0], name.shape[1]), np.uint8), cameras[idx].K().astype(np.float32), cameras[idx].R, cv2.INTER_NEAREST, cv2.BORDER_CONSTANT)
+            compensator.apply(idx, corners[idx], image_warped, mask_warped)
+            mask_warped = cv2.bitwise_and(cv2.resize(cv2.dilate(masks_warped[idx], None), (mask_warped.shape[1], mask_warped.shape[0]), 0, 0, cv2.INTER_LINEAR_EXACT), mask_warped)
+            blender.feed(cv2.UMat(image_warped.astype(np.int16)), mask_warped, corners[idx])
     
-    #     result, result_mask = blender.blend(None, None)
-    #     dst = cv2.normalize(src=result, dst=None, alpha=255., norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_8U)
-    #     dst = cv2.resize(dst, dsize=None, fx=600.0 / result.shape[1], fy=600.0 / result.shape[1])
-    #     return False,dst
+        result, result_mask = blender.blend(None, None)
+        dst = cv2.normalize(src=result, dst=None, alpha=255., norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_8U)
+        dst = cv2.resize(dst, dsize=None, fx=600.0 / result.shape[1], fy=600.0 / result.shape[1])
+        return False,dst
         
     img_names = np.asarray([left_image,right_image])
 
@@ -221,6 +222,7 @@ def Manual_Detailed(
     seam_finder = cv2.detail_GraphCutSeamFinder('COST_COLOR')
     seam_finder.find(images_warped_f, corners.tolist(), masks_warped)# .tolist()
 
+    """calculate corner and size of time step"""
     corners = []
     sizes = []
     for i in range(len(img_names)):
@@ -233,11 +235,10 @@ def Manual_Detailed(
         corners.append(roi[0:2])
         sizes.append(roi[2:4])
 
-    blender = cv2.detail.Blender_createDefault(cv2.detail.Blender_NO)
     dst_sz = cv2.detail.resultRoi(corners=corners, sizes=sizes)
     blend_width = np.sqrt(dst_sz[2] * dst_sz[3]) * 5 / 100
-    if blend_width < 1: blender = cv2.detail.Blender_createDefault(cv2.detail.Blender_NO)
     blender.prepare(dst_sz)
+    print(dst_sz)
 
     """Panorama construction step"""
     # https://github.com/opencv/opencv/blob/master/samples/cpp/stitching_detailed.cpp#L725 ?
@@ -251,7 +252,7 @@ def Manual_Detailed(
     result, result_mask = blender.blend(None, None)
     dst = cv2.normalize(src=result, dst=None, alpha=255., norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_8U)
     dst = cv2.resize(dst, dsize=None, fx=600.0 / result.shape[1], fy=600.0 / result.shape[1])
-    cached = (blender,cameras,warper,compensator,corners,masks_warped)
+    cached = (dst_sz,cameras,warper,compensator,corners,masks_warped)
     return False,dst,cached
 
 def Kseam_work_aspect(K,seam_work_aspect):
