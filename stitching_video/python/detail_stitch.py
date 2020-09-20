@@ -201,21 +201,26 @@ def get_compensator(args):
         compensator = cv.detail.ExposureCompensator_createDefault(expos_comp_type)
     return compensator
 
-def Manual_Detailed(left_image,right_image,work_megapix=0.6,seam_megapix=0.1,ba_refine_mask="xxxxx",finder=cv.xfeatures2d_SURF.create() ):
+def Manual(
+    left_image,
+    right_image,
+    cached=None,
+    work_megapix=1.9,
+    seam_megapix=0.01,
+    ba_refine_mask='xxxxx',
+    finder=cv.xfeatures2d_SURF.create(),
+    blender=cv.detail.Blender_createDefault(cv.detail.Blender_NO)
+    ):
     img_names = np.asarray([left_image,right_image])
 
-    # finder = cv.xfeatures2d_SURF.create() 
-    # finder = cv.ORB.create()
-    # finder =cv.xfeatures2d_SIFT.create()
-    # finder = cv.BRISK_create()
-    # finder = cv.AKAZE_create()
-    # finder = cv.FastFeatureDetector_create()
-
-    work_megapix=1.9
-    seam_megapix=0.01
-    is_work_scale_set = False
-    is_seam_scale_set = False
-    is_compose_scale_set = False
+    """
+    finder = cv.xfeatures2d_SURF.create() 
+    finder = cv.ORB.create()
+    finder = cv.xfeatures2d_SIFT.create()
+    finder = cv.BRISK_create()
+    finder = cv.AKAZE_create()
+    finder = cv.FastFeatureDetector_create(),
+    """
 
     work_scale = min(1.0, np.sqrt(work_megapix * 1e6 / (left_image.shape[0] * left_image.shape[1]))) # because both image dimensions should be the same
     seam_scale = min(1.0, np.sqrt(seam_megapix * 1e6 / (left_image.shape[0] * left_image.shape[1])))
@@ -225,7 +230,8 @@ def Manual_Detailed(left_image,right_image,work_megapix=0.6,seam_megapix=0.1,ba_
     features = np.asarray([cv.detail.computeImageFeatures2(finder,cv.resize(src=name, dsize=None, fx=work_scale, fy=work_scale, interpolation=cv.INTER_LINEAR_EXACT)) for name in img_names])
     images = np.asarray([cv.resize(src=name, dsize=None, fx=seam_scale, fy=seam_scale, interpolation=cv.INTER_LINEAR_EXACT) for name in img_names])
     
-    matcher = get_matcher(args)
+    # matcher = get_matcher(args)
+    matcher = cv.detail.BestOf2NearestMatcher_create(False, 0.65)
     p = matcher.apply2(features)
     matcher.collectGarbage()
 
@@ -264,20 +270,39 @@ def Manual_Detailed(left_image,right_image,work_megapix=0.6,seam_megapix=0.1,ba_
     warper = cv.PyRotationWarper('spherical', warped_image_scale * seam_work_aspect)  # warper could be nullptr?
     masks = np.asarray([cv.UMat(255 * np.ones((images[i].shape[0], images[i].shape[1]), np.uint8)) for i in range(img_names.shape[0])])
     corners = np.asarray([warper.warp(images[idx], Kseam_work_aspect(cameras[idx].K().astype(np.float32),seam_work_aspect), cameras[idx].R, cv.INTER_LINEAR, cv.BORDER_REFLECT)[0] for idx in range(img_names.shape[0])])
-    masks_warped = np.asarray([warper.warp(masks[idx], Kseam_work_aspect(cameras[idx].K().astype(np.float32),seam_work_aspect), cameras[idx].R, cv.INTER_NEAREST, cv.BORDER_CONSTANT)[1].get() for idx in range(img_names.shape[0])])
-    images_warped = np.asarray([warper.warp(images[idx], Kseam_work_aspect(cameras[idx].K().astype(np.float32),seam_work_aspect), cameras[idx].R, cv.INTER_LINEAR, cv.BORDER_REFLECT)[1]for idx in range(img_names.shape[0])])
+    # masks_warped = np.asarray([warper.warp(masks[idx], Kseam_work_aspect(cameras[idx].K().astype(np.float32),seam_work_aspect), cameras[idx].R, cv.INTER_NEAREST, cv.BORDER_CONSTANT)[1].get() for idx in range(img_names.shape[0])])
+    masks_warped = []
+    images_warped = []
+    for idx in range(img_names.shape[0]):
+        K = cameras[idx].K().astype(np.float32)
+        swa = seam_work_aspect
+        K[0, 0] *= swa
+        K[0, 2] *= swa
+        K[1, 1] *= swa
+        K[1, 2] *= swa
+        corner, image_wp = warper.warp(images[idx], K, cameras[idx].R, cv.INTER_LINEAR, cv.BORDER_REFLECT)
+        images_warped.append(image_wp)
+        p, mask_wp = warper.warp(masks[idx], K, cameras[idx].R, cv.INTER_NEAREST, cv.BORDER_CONSTANT)
+        masks_warped.append(mask_wp.get())  
+    # images_warped = np.asarray([warper.warp(images[idx], Kseam_work_aspect(cameras[idx].K().astype(np.float32),seam_work_aspect), cameras[idx].R, cv.INTER_LINEAR, cv.BORDER_REFLECT)[1]for idx in range(img_names.shape[0])])
     sizes = np.asarray([warper.warp(images[idx], Kseam_work_aspect(cameras[idx].K().astype(np.float32),seam_work_aspect), cameras[idx].R, cv.INTER_LINEAR, cv.BORDER_REFLECT)[1].shape[1::-1] for idx in range(img_names.shape[0])])
-    images_warped_f = np.asarray([img.astype(np.float32) for img in images_warped])
-  
+    # images_warped_f = np.asarray([img.astype(np.float32) for img in images_warped])
+    images_warped_f = []
+    for img in images_warped:
+        imgf = img.astype(np.float32)
+        images_warped_f.append(imgf)
 
-    compensator = get_compensator(args) 
+    # compensator = get_compensator(args) 
+    compensator = cv.detail.ExposureCompensator_createDefault(cv.detail.ExposureCompensator_GAIN_BLOCKS)
     compensator.feed(corners=corners.tolist(), images=images_warped, masks=masks_warped) # .tolist()
-    seam_finder = SEAM_FIND_CHOICES[args.seam]
+    # seam_finder = SEAM_FIND_CHOICES[args.seam]
+    seam_finder = cv.detail_GraphCutSeamFinder('COST_COLOR')
     seam_finder.find(images_warped_f, corners.tolist(), masks_warped)# .tolist()
 
     warped_image_scale *= 1/work_scale
     warper = cv.PyRotationWarper('spherical', warped_image_scale)
 
+    """calculate corner and size of time step"""
     corners = []
     sizes = []
     for i in range(len(img_names)):
@@ -289,16 +314,10 @@ def Manual_Detailed(left_image,right_image,work_megapix=0.6,seam_megapix=0.1,ba_
         roi = warper.warpRoi(sz, K, cameras[i].R)
         corners.append(roi[0:2])
         sizes.append(roi[2:4])
-    # corners = np.asarray([cam_focal_ppx_ppy(camers,i,work_scale) for i in range(img_names[0])])
 
-
-    blender = cv.detail.Blender_createDefault(cv.detail.Blender_NO)
     dst_sz = cv.detail.resultRoi(corners=corners, sizes=sizes)
     blend_width = np.sqrt(dst_sz[2] * dst_sz[3]) * 5 / 100
-    print(blend_width)
-    if blend_width < 1: blender = cv.detail.Blender_createDefault(cv.detail.Blender_NO)
     blender.prepare(dst_sz)
-    print(dst_sz)
 
     """Panorama construction step"""
     # https://github.com/opencv/opencv/blob/master/samples/cpp/stitching_detailed.cpp#L725 ?
@@ -310,14 +329,13 @@ def Manual_Detailed(left_image,right_image,work_megapix=0.6,seam_megapix=0.1,ba_
         blender.feed(cv.UMat(image_warped.astype(np.int16)), mask_warped, corners[idx])
     
     result, result_mask = blender.blend(None, None)
-    cv.imwrite('result.jpg', result)
-    zoom_x = 600.0 / result.shape[1]
+    # cv.imwrite('result.jpg', result)
     dst = cv.normalize(src=result, dst=None, alpha=255., norm_type=cv.NORM_MINMAX, dtype=cv.CV_8U)
-    dst = cv.resize(dst, dsize=None, fx=zoom_x, fy=zoom_x)
-    cv.imshow('result.jpg', dst)
-    cv.waitKey()
-    print("Done")
-    return True,dst,blender,cameras
+    dst = imutils.resize(dst,width=1080)
+    # cv.imshow('result.jpg', dst)
+    # cv.waitKey()
+    cached = (dst_sz,cameras,warper,compensator,corners,masks_warped)
+    return False,dst,cached
 
 if __name__ == '__main__':
     parser,args = arguments()

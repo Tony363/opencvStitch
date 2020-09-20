@@ -11,6 +11,7 @@ sys.path.append(path.dirname(path.dirname(__file__)))
 
 from math import ceil
 from utils import *
+# from detail_stitch import *
 class CSI_Camera:
 
     def __init__ (self,interface,capture_width, capture_height) :
@@ -151,7 +152,7 @@ class Panorama:
         # self.GPU = cv2.cuda_GpuMat()
 
         # Initialize Stitcher class
-        self.stitcher = Manual_Detailed
+        self.stitcher = Manual
         self.stitcher_cached = None
         self.to_estimate = None
         self.stitched_frames = 0
@@ -238,6 +239,7 @@ class Panorama:
                                 break
 
                             compose_time = timer()
+                            # status,pano, cached = self.stitcher(left_image,right_image)
                             status,pano = self.stitcher(left_image,right_image,self.stitcher_cached)
                             # self.GPU.upload(pano)
                             timer(compose_time, "compose_time", self.timer)
