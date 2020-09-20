@@ -149,6 +149,9 @@ class Panorama:
         self.out = None # Video writer
         self.out_path = out_path
         self.fps_array = collections.deque(maxlen=5) # Store processing time for last 5 frames to estimate video writer FPS
+
+        # batched saving
+        self.memory_store = np.asarray([])
         # self.GPU = cv2.cuda_GpuMat()
 
         # Initialize Stitcher class
@@ -169,7 +172,6 @@ class Panorama:
         else:
             self.stop_frame = stop_frame
         
-
         # The thread where the video stitching runs
         self.stitch_thread = None
         self.read_lock = threading.Lock()
@@ -249,13 +251,12 @@ class Panorama:
                             
                         
                         excution_time = timer(stitch_start_time)
-                        print(CODES.INFO,"Stitching completed successfully ({}/{}). Done in {:.3f}s. {}".format(self.stitched_frames + 1,self.stop_frame,excution_time, "SAVED" if self.save else ""))
+                        print(CODES.INFO,"Stitching completed successfully ({}/{}). Done in {:.3f}s. {}".format(self.stitched_frames + 1,self.stop_frame,excution_time, "STORED" if self.save else ""))
                         
                         self.fps_array.append(1/excution_time)
                         readFrame += 1
                         if self.save and self.out is not None:
-                            # self.out.write(self.GPU.download())
-                            self.out.write(pano)
+                            self.memory_store = np.append(self.memory_store,cv2.UMat(pano))
 
                         with self.read_lock:
                             self.status=status

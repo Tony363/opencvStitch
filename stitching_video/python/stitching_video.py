@@ -129,6 +129,10 @@ def read_vid_thread(stitcher,interface,device0,device1,capture_width, capture_he
         # if the stitching is done or has reached the set limit frames
         if final_camera.isDone:
             break
+    if SAVE:
+        for frame in final_camera.memory_store:
+            print(frame)
+            final_camera.out.write(frame)
 
     cleanMemory()
 
@@ -212,7 +216,6 @@ def read_vid(stitcher,interface,device0,device1,capture_width,capture_height,vid
                 if status_check(status):
                     print(CODES.INFO, "Transform successfully estimated")
 
-
                 status,pano = stitcher.composePanorama([left_frame,right_frame],pano)
                 if not status_check(status):
                     continue
@@ -239,7 +242,6 @@ def read_vid(stitcher,interface,device0,device1,capture_width,capture_height,vid
                 if not status_check(status):
                     print(CODES.ERROR, "composePanorama failed.")
 
-            
             # View the stitched panorama. Press "q" to quit the program.
             if pano is not None and view:
                 pano_resized = cv2.UMat.get(pano)
@@ -258,8 +260,6 @@ def read_vid(stitcher,interface,device0,device1,capture_width,capture_height,vid
             print(CODES.ERROR, "Can't read the images")
             sys.exit(-1) 
 
-
-        
     # Display Execution time
     timer(execution_time,"execution_time",DISPLAY_TIMER)
     # Clean memory
