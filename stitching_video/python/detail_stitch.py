@@ -13,6 +13,7 @@ from collections import OrderedDict
 
 import cv2 as cv
 import numpy as np
+import imutils
 import faulthandler; faulthandler.enable()
 
 EXPOS_COMP_CHOICES = OrderedDict()
@@ -162,11 +163,11 @@ def Kseam_work_aspect(K,seam_work_aspect):
     K[1, 2] *= seam_work_aspect
     return K
 
-def cam_focal_ppx_ppy(cameras,idx,work_scale):
-    cameras[idx].focal *= 1/work_scale
-    cameras[idx].ppx *= 1/work_scale
-    cameras[idx].ppy *= 1/work_scale
-    return cameras[idx].R
+def cam_focal_ppx_ppy(cameras,i,work_scale):
+    cameras[i].focal *= 1/work_scale
+    cameras[i].ppx *= 1/work_scale
+    cameras[i].ppy *= 1/work_scale
+
 
 def get_matcher(args):
     try_cuda = args.try_cuda
@@ -200,21 +201,18 @@ def get_compensator(args):
         compensator = cv.detail.ExposureCompensator_createDefault(expos_comp_type)
     return compensator
 
-
-def main(left_image,right_image,args):
+def Manual_Detailed(left_image,right_image,work_megapix=0.6,seam_megapix=0.1,ba_refine_mask="xxxxx",finder=cv.xfeatures2d_SURF.create() ):
     img_names = np.asarray([left_image,right_image])
 
-    work_megapix = 0.6
-    seam_megapix = 0.1
-    ba_refine_mask = 'xxxxx'
-    
-    finder = cv.xfeatures2d_SURF.create() 
+    # finder = cv.xfeatures2d_SURF.create() 
     # finder = cv.ORB.create()
     # finder =cv.xfeatures2d_SIFT.create()
     # finder = cv.BRISK_create()
     # finder = cv.AKAZE_create()
     # finder = cv.FastFeatureDetector_create()
 
+    work_megapix=1.9
+    seam_megapix=0.01
     is_work_scale_set = False
     is_seam_scale_set = False
     is_compose_scale_set = False
@@ -272,66 +270,59 @@ def main(left_image,right_image,args):
     images_warped_f = np.asarray([img.astype(np.float32) for img in images_warped])
   
 
-    compensator = get_compensator(args)
+    compensator = get_compensator(args) 
     compensator.feed(corners=corners.tolist(), images=images_warped, masks=masks_warped) # .tolist()
     seam_finder = SEAM_FIND_CHOICES[args.seam]
     seam_finder.find(images_warped_f, corners.tolist(), masks_warped)# .tolist()
 
-  
-    # corners = np.asarray([ if idx > 0 else cv.PyRotationWarper(warp_type, 1/work_scale).warpRoi((full_img_sizes[idx][0] * 1, full_img_sizes[idx][1] * 1),cameras[idx].K().astype(np.float32),cameras[idx].R)[0:2]  for idx,name in enumerate(img_names)])
+    warped_image_scale *= 1/work_scale
+    warper = cv.PyRotationWarper('spherical', warped_image_scale)
+
     corners = []
     sizes = []
-    blender = None
-    timelapser = None
+    for i in range(len(img_names)):
+        cameras[i].focal *= 0.9999/work_scale
+        cameras[i].ppx *= 1/work_scale
+        cameras[i].ppy *= 1/work_scale
+        sz = (full_img_sizes[i][0] * 1, full_img_sizes[i][1] * 1)
+        K = cameras[i].K().astype(np.float32)
+        roi = warper.warpRoi(sz, K, cameras[i].R)
+        corners.append(roi[0:2])
+        sizes.append(roi[2:4])
+    # corners = np.asarray([cam_focal_ppx_ppy(camers,i,work_scale) for i in range(img_names[0])])
+
+
+    blender = cv.detail.Blender_createDefault(cv.detail.Blender_NO)
+    dst_sz = cv.detail.resultRoi(corners=corners, sizes=sizes)
+    blend_width = np.sqrt(dst_sz[2] * dst_sz[3]) * 5 / 100
+    print(blend_width)
+    if blend_width < 1: blender = cv.detail.Blender_createDefault(cv.detail.Blender_NO)
+    blender.prepare(dst_sz)
+    print(dst_sz)
+
+    """Panorama construction step"""
     # https://github.com/opencv/opencv/blob/master/samples/cpp/stitching_detailed.cpp#L725 ?
     for idx, name in enumerate(img_names):
-        if not is_compose_scale_set:
-            is_compose_scale_set = True
-            warped_image_scale *= 1/work_scale
-            warper = cv.PyRotationWarper('spherical', warped_image_scale)
-            for i in range(0, len(img_names)):
-                cameras[i].focal *= 1/work_scale
-                cameras[i].ppx *= 1/work_scale
-                cameras[i].ppy *= 1/work_scale
-                sz = (full_img_sizes[i][0] * 1, full_img_sizes[i][1] * 1)
-                K = cameras[i].K().astype(np.float32)
-                roi = warper.warpRoi(sz, K, cameras[i].R)
-                corners.append(roi[0:2])
-                sizes.append(roi[2:4])
-        _img_size = (name.shape[1], name.shape[0])
-        K = cameras[idx].K().astype(np.float32)
-        corner, image_warped = warper.warp(name, K, cameras[idx].R, cv.INTER_LINEAR, cv.BORDER_REFLECT)
-        mask = 255 * np.ones((name.shape[0], name.shape[1]), np.uint8)
-        p, mask_warped = warper.warp(mask, K, cameras[idx].R, cv.INTER_NEAREST, cv.BORDER_CONSTANT)
+        corner, image_warped = warper.warp(name, cameras[idx].K().astype(np.float32), cameras[idx].R, cv.INTER_LINEAR, cv.BORDER_REFLECT)
+        p, mask_warped = warper.warp(255 * np.ones((name.shape[0], name.shape[1]), np.uint8), cameras[idx].K().astype(np.float32), cameras[idx].R, cv.INTER_NEAREST, cv.BORDER_CONSTANT)
         compensator.apply(idx, corners[idx], image_warped, mask_warped)
-        image_warped_s = image_warped.astype(np.int16)
-        dilated_mask = cv.dilate(masks_warped[idx], None)
-        seam_mask = cv.resize(dilated_mask, (mask_warped.shape[1], mask_warped.shape[0]), 0, 0, cv.INTER_LINEAR_EXACT)
-        mask_warped = cv.bitwise_and(seam_mask, mask_warped)
-        if blender is None:
-            blender = cv.detail.Blender_createDefault(cv.detail.Blender_NO)
-            dst_sz = cv.detail.resultRoi(corners=corners, sizes=sizes)
-            blend_width = np.sqrt(dst_sz[2] * dst_sz[3]) * 5 / 100
-            if blend_width < 1:
-                blender = cv.detail.Blender_createDefault(cv.detail.Blender_NO)
-            blender.prepare(dst_sz)
-        blender.feed(cv.UMat(image_warped_s), mask_warped, corners[idx])
-    result = None
-    result_mask = None
-    result, result_mask = blender.blend(result, result_mask)
-    # cv.imwrite('result.jpg', result)
+        mask_warped = cv.bitwise_and(cv.resize(cv.dilate(masks_warped[idx], None), (mask_warped.shape[1], mask_warped.shape[0]), 0, 0, cv.INTER_LINEAR_EXACT), mask_warped)
+        blender.feed(cv.UMat(image_warped.astype(np.int16)), mask_warped, corners[idx])
+    
+    result, result_mask = blender.blend(None, None)
+    cv.imwrite('result.jpg', result)
     zoom_x = 600.0 / result.shape[1]
     dst = cv.normalize(src=result, dst=None, alpha=255., norm_type=cv.NORM_MINMAX, dtype=cv.CV_8U)
     dst = cv.resize(dst, dsize=None, fx=zoom_x, fy=zoom_x)
-    # cv.imshow('result.jpg', dst)
-    # cv.waitKey()
-    # print("Done")
-    return True,dst
+    cv.imshow('result.jpg', dst)
+    cv.waitKey()
+    print("Done")
+    return True,dst,blender,cameras
 
 if __name__ == '__main__':
     parser,args = arguments()
     __doc__ += '\n' + parser.format_help()
     print(__doc__)
     left_image,right_image = cv.imread(args.img_names[0]),cv.imread(args.img_names[1])
-    main(left_image,right_image,args)
+    Manual_Detailed(left_image,right_image,args)
     cv.destroyAllWindows()

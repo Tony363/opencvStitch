@@ -11,7 +11,6 @@ sys.path.append(path.dirname(path.dirname(__file__)))
 
 from math import ceil
 from utils import *
-# from Stitcher_class import *
 class CSI_Camera:
 
     def __init__ (self,interface,capture_width, capture_height) :
@@ -153,8 +152,9 @@ class Panorama:
 
         # Initialize Stitcher class
         # self.stitcher = cv2.Stitcher.create(cv2.Stitcher_PANORAMA)
+        self.stitcher = Manual_Detailed
+        self.stitcher_cached = None
         self.to_estimate = None
-        self.stitcher = Manual()
         self.stitched_frames = 0
         self.timer = timer
 
@@ -190,7 +190,7 @@ class Panorama:
     # Thread that stitches frames
     def stitchCamera(self):
             # NB : cv2.UMat array is faster than np array
-            pano = cv2.UMat(np.asarray([]))
+            # pano = cv2.UMat(np.asarray([]))
             readFrame = 0
             while self.running:
                 try:
@@ -211,7 +211,9 @@ class Panorama:
                             #     self.to_estimate = False
 
                             # status,pano = self.stitcher.composePanorama([left_image,right_image],pano)
-                            status,pano = self.stitcher.stitch([left_image,right_image])
+                            # status,pano = self.stitcher.stitch([left_image,right_image])
+                            status,pano,cached = self.stitcher(left_image,right_image)
+                            self.stitcher_cached = cached
                             # self.GPU.upload(pano)
                             # if not status_check(status):
                             #     continue
@@ -244,12 +246,9 @@ class Panorama:
 
                             compose_time = timer()
                             # status, pano = self.stitcher.composePanorama([left_image,right_image],pano)
-                            if self.to_estimate:
-                                print(self.to_estimate,'\n')
-                                self.stitcher = Manual().to_estimate = self.to_estimate
-                                status,pano = self.stitcher.stitch([left_image,right_iamge])
-                            else:
-                                status,pano = self.stitcher.stitch([left_image,right_image])
+                            # status,pano = self.stitcher.stitch([left_image,right_image])
+                            status,pano,cached = self.stitcher(left_image,right_image)
+                            # status,pano = self.stitcher(left_image,right_image,self.stitcher_cached)
                             # self.GPU.upload(pano)
                             timer(compose_time, "compose_time", self.timer)
                             if not status_check(status):
