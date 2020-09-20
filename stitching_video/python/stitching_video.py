@@ -113,6 +113,10 @@ def read_vid_thread(stitcher,interface,device0,device1,capture_width, capture_he
             timer(wait_key_time,"wait_key_time",DISPLAY_TIMER)
 
             if keyCode == ord('q'):
+                if SAVE:
+                    for idx,frame in enumerate(final_camera.memory_store):
+                        print(CODES.SAVED,frame,"Memory ",idx)
+                        final_camera.out.write(frame)
                 print(CODES.INFO, "Successfully quit the program.")
                 break
 
@@ -129,10 +133,6 @@ def read_vid_thread(stitcher,interface,device0,device1,capture_width, capture_he
         # if the stitching is done or has reached the set limit frames
         if final_camera.isDone:
             break
-    if SAVE:
-        for frame in final_camera.memory_store:
-            print(frame)
-            final_camera.out.write(frame)
 
     cleanMemory()
 

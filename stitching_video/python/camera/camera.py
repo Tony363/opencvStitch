@@ -251,12 +251,13 @@ class Panorama:
                             
                         
                         excution_time = timer(stitch_start_time)
-                        print(CODES.INFO,"Stitching completed successfully ({}/{}). Done in {:.3f}s. {}".format(self.stitched_frames + 1,self.stop_frame,excution_time, "STORED" if self.save else ""))
+                        print(CODES.INFO,"Stitching completed successfully ({}/{}). Done in {:.3f}s. {}/{}".format(self.stitched_frames + 1,self.stop_frame,excution_time, "STORED" if self.save else "",self.memory_store.size if self.save else ""))
                         
                         self.fps_array.append(1/excution_time)
                         readFrame += 1
                         if self.save and self.out is not None:
                             self.memory_store = np.append(self.memory_store,cv2.UMat(pano))
+                          
 
                         with self.read_lock:
                             self.status=status

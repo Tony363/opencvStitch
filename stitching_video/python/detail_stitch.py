@@ -11,55 +11,55 @@ from __future__ import print_function
 import argparse
 from collections import OrderedDict
 
-import cv2 as cv
+import cv2 
 import numpy as np
 import imutils
 import faulthandler; faulthandler.enable()
 
 EXPOS_COMP_CHOICES = OrderedDict()
-EXPOS_COMP_CHOICES['gain_blocks'] = cv.detail.ExposureCompensator_GAIN_BLOCKS
-EXPOS_COMP_CHOICES['gain'] = cv.detail.ExposureCompensator_GAIN
-EXPOS_COMP_CHOICES['channel'] = cv.detail.ExposureCompensator_CHANNELS
-EXPOS_COMP_CHOICES['channel_blocks'] = cv.detail.ExposureCompensator_CHANNELS_BLOCKS
-EXPOS_COMP_CHOICES['no'] = cv.detail.ExposureCompensator_NO
+EXPOS_COMP_CHOICES['gain_blocks'] = cv2.detail.ExposureCompensator_GAIN_BLOCKS
+EXPOS_COMP_CHOICES['gain'] = cv2.detail.ExposureCompensator_GAIN
+EXPOS_COMP_CHOICES['channel'] = cv2.detail.ExposureCompensator_CHANNELS
+EXPOS_COMP_CHOICES['channel_blocks'] = cv2.detail.ExposureCompensator_CHANNELS_BLOCKS
+EXPOS_COMP_CHOICES['no'] = cv2.detail.ExposureCompensator_NO
 
 BA_COST_CHOICES = OrderedDict()
-BA_COST_CHOICES['ray'] = cv.detail_BundleAdjusterRay
-BA_COST_CHOICES['reproj'] = cv.detail_BundleAdjusterReproj
-BA_COST_CHOICES['affine'] = cv.detail_BundleAdjusterAffinePartial
-BA_COST_CHOICES['no'] = cv.detail_NoBundleAdjuster
+BA_COST_CHOICES['ray'] = cv2.detail_BundleAdjusterRay
+BA_COST_CHOICES['reproj'] = cv2.detail_BundleAdjusterReproj
+BA_COST_CHOICES['affine'] = cv2.detail_BundleAdjusterAffinePartial
+BA_COST_CHOICES['no'] = cv2.detail_NoBundleAdjuster
 
 FEATURES_FIND_CHOICES = OrderedDict()
 try:
-    FEATURES_FIND_CHOICES['surf'] = cv.xfeatures2d_SURF.create
+    FEATURES_FIND_CHOICES['surf'] = cv2.xfeatures2d_SURF.create
 except AttributeError:
     print("SURF not available")
 # if SURF not available, ORB is default
-FEATURES_FIND_CHOICES['orb'] = cv.ORB.create
+FEATURES_FIND_CHOICES['orb'] = cv2.ORB.create
 try:
-    FEATURES_FIND_CHOICES['sift'] = cv.xfeatures2d_SIFT.create
+    FEATURES_FIND_CHOICES['sift'] = cv2.xfeatures2d_SIFT.create
 except AttributeError:
     print("SIFT not available")
 try:
-    FEATURES_FIND_CHOICES['brisk'] = cv.BRISK_create
+    FEATURES_FIND_CHOICES['brisk'] = cv2.BRISK_create
 except AttributeError:
     print("BRISK not available")
 try:
-    FEATURES_FIND_CHOICES['akaze'] = cv.AKAZE_create
+    FEATURES_FIND_CHOICES['akaze'] = cv2.AKAZE_create
 except AttributeError:
     print("AKAZE not available")
 
 SEAM_FIND_CHOICES = OrderedDict()
-SEAM_FIND_CHOICES['gc_color'] = cv.detail_GraphCutSeamFinder('COST_COLOR')
-SEAM_FIND_CHOICES['gc_colorgrad'] = cv.detail_GraphCutSeamFinder('COST_COLOR_GRAD')
-SEAM_FIND_CHOICES['dp_color'] = cv.detail_DpSeamFinder('COLOR')
-SEAM_FIND_CHOICES['dp_colorgrad'] = cv.detail_DpSeamFinder('COLOR_GRAD')
-SEAM_FIND_CHOICES['voronoi'] = cv.detail.SeamFinder_createDefault(cv.detail.SeamFinder_VORONOI_SEAM)
-SEAM_FIND_CHOICES['no'] = cv.detail.SeamFinder_createDefault(cv.detail.SeamFinder_NO)
+SEAM_FIND_CHOICES['gc_color'] = cv2.detail_GraphCutSeamFinder('COST_COLOR')
+SEAM_FIND_CHOICES['gc_colorgrad'] = cv2.detail_GraphCutSeamFinder('COST_COLOR_GRAD')
+SEAM_FIND_CHOICES['dp_color'] = cv2.detail_DpSeamFinder('COLOR')
+SEAM_FIND_CHOICES['dp_colorgrad'] = cv2.detail_DpSeamFinder('COLOR_GRAD')
+SEAM_FIND_CHOICES['voronoi'] = cv2.detail.SeamFinder_createDefault(cv2.detail.SeamFinder_VORONOI_SEAM)
+SEAM_FIND_CHOICES['no'] = cv2.detail.SeamFinder_createDefault(cv2.detail.SeamFinder_NO)
 
 ESTIMATOR_CHOICES = OrderedDict()
-ESTIMATOR_CHOICES['homography'] = cv.detail_HomographyBasedEstimator
-ESTIMATOR_CHOICES['affine'] = cv.detail_AffineBasedEstimator
+ESTIMATOR_CHOICES['homography'] = cv2.detail_HomographyBasedEstimator
+ESTIMATOR_CHOICES['affine'] = cv2.detail_AffineBasedEstimator
 
 WARP_CHOICES = (
     'spherical',
@@ -179,7 +179,7 @@ def get_matcher(args):
             match_conf = 0.65
     else:
         match_conf = args.match_conf
-    matcher = cv.detail.BestOf2NearestMatcher_create(try_cuda, match_conf)
+    matcher = cv2.detail.BestOf2NearestMatcher_create(try_cuda, match_conf)
     return matcher
 
 
@@ -188,17 +188,17 @@ def get_compensator(args):
     expos_comp_nr_feeds = args.expos_comp_nr_feeds
     expos_comp_block_size = args.expos_comp_block_size
     # expos_comp_nr_filtering = args.expos_comp_nr_filtering
-    if expos_comp_type == cv.detail.ExposureCompensator_CHANNELS:
-        compensator = cv.detail_ChannelsCompensator(expos_comp_nr_feeds)
+    if expos_comp_type == cv2.detail.ExposureCompensator_CHANNELS:
+        compensator = cv2.detail_ChannelsCompensator(expos_comp_nr_feeds)
         # compensator.setNrGainsFilteringIterations(expos_comp_nr_filtering)
-    elif expos_comp_type == cv.detail.ExposureCompensator_CHANNELS_BLOCKS:
-        compensator = cv.detail_BlocksChannelsCompensator(
+    elif expos_comp_type == cv2.detail.ExposureCompensator_CHANNELS_BLOCKS:
+        compensator = cv2.detail_BlocksChannelsCompensator(
             expos_comp_block_size, expos_comp_block_size,
             expos_comp_nr_feeds
         )
         # compensator.setNrGainsFilteringIterations(expos_comp_nr_filtering)
     else:
-        compensator = cv.detail.ExposureCompensator_createDefault(expos_comp_type)
+        compensator = cv2.detail.ExposureCompensator_createDefault(expos_comp_type)
     return compensator
 
 def Manual(
@@ -221,18 +221,6 @@ def Manual(
     finder = cv.AKAZE_create()
     finder = cv.FastFeatureDetector_create(),
     """
-    if cached is not None:
-        dst_sz,cameras,warper,compensator,corners,masks_warped = cached
-        blender.prepare(dst_sz)
-        for idx, name in enumerate(np.asarray([left_image,right_image])):
-            corner, image_warped = warper.warp(name, cameras[idx].K().astype(np.float32), cameras[idx].R, cv2.INTER_LINEAR, cv2.BORDER_REFLECT)
-            p, mask_warped = warper.warp(255 * np.ones((name.shape[0], name.shape[1]), np.uint8), cameras[idx].K().astype(np.float32), cameras[idx].R, cv2.INTER_NEAREST, cv2.BORDER_CONSTANT)
-            compensator.apply(idx, corners[idx], image_warped, mask_warped)
-            mask_warped = cv2.bitwise_and(cv2.resize(cv2.dilate(masks_warped[idx], None), (mask_warped.shape[1], mask_warped.shape[0]), 0, 0, cv2.INTER_LINEAR_EXACT), mask_warped)
-            blender.feed(cv2.UMat(image_warped.astype(np.int16)), mask_warped, corners[idx])
-        result, result_mask = blender.blend(None, None)
-        dst = cv2.normalize(src=result, dst=None, alpha=255., norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_8U)
-        return False,dst
         
     work_scale = min(1.0, np.sqrt(work_megapix * 1e6 / (left_image.shape[0] * left_image.shape[1]))) # because both image dimensions should be the same
     seam_scale = min(1.0, np.sqrt(seam_megapix * 1e6 / (left_image.shape[0] * left_image.shape[1])))
@@ -342,14 +330,14 @@ def Manual(
     
     result, result_mask = blender.blend(None, None)
     dst = cv2.normalize(src=result, dst=None, alpha=255., norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_8U)
-    dst = imutils.resize(dst,width=1080)
-    cached = (dst_sz,cameras,warper,compensator,corners,masks_warped)
-    return False,dst,cached
+    cv2.imshow('stitched_image',imutils.resize(dst,width=1080))
+    cv2.waitKey(0)
+    return False,dst
 
 if __name__ == '__main__':
     parser,args = arguments()
     __doc__ += '\n' + parser.format_help()
     print(__doc__)
-    left_image,right_image = cv.imread(args.img_names[0]),cv.imread(args.img_names[1])
-    Manual_Detailed(left_image,right_image,args)
-    cv.destroyAllWindows()
+    left_image,right_image = cv2.imread(args.img_names[0]),cv2.imread(args.img_names[1])
+    Manual(left_image,right_image,args)
+    cv2.destroyAllWindows()

@@ -8,6 +8,7 @@ import faulthandler; faulthandler.enable()
 class CODES:
     INFO = "[INFO]"
     ERROR = "[ERROR]"
+    SAVED = "[SAVED]"
 
 
 # Return time elapsed
@@ -143,10 +144,11 @@ def Manual(
     cached=None,
     work_megapix=0.69,
     seam_megapix=0.01,
-    ba_refine_mask='xxxxx',
-    finder = cv2.ORB.create(),
+    ba_refine_mask='_____',
+    finder=cv2.ORB.create(),
     blender=cv2.detail.Blender_createDefault(cv2.detail.Blender_NO),
-    compensator=cv2.detail.ExposureCompensator_createDefault(cv2.detail.ExposureCompensator_GAIN_BLOCKS),
+    compensator=cv2.detail.ExposureCompensator_createDefault(cv2.detail.ExposureCompensator_NO),
+    seam_finder=cv2.detail.SeamFinder_createDefault(cv2.detail.SeamFinder_NO),
     ):
     img_names = np.asarray([left_image,right_image])
 
@@ -227,7 +229,6 @@ def Manual(
     images_warped_f = np.asarray([img.astype(np.float32) for img in images_warped])
 
     compensator.feed(corners=corners.tolist(), images=images_warped, masks=masks_warped) # .tolist()
-    seam_finder = cv2.detail_GraphCutSeamFinder('COST_COLOR')
     seam_finder.find(images_warped_f, corners.tolist(), masks_warped)# .tolist()
 
     warped_image_scale *= 1/work_scale
@@ -261,6 +262,5 @@ def Manual(
     
     result, result_mask = blender.blend(None, None)
     dst = cv2.normalize(src=result, dst=None, alpha=255., norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_8U)
-    dst = imutils.resize(dst,width=1080)
     cached = (dst_sz,warper,cameras,corners,masks_warped)
     return False,dst,cached
