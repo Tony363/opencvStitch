@@ -142,27 +142,18 @@ def Manual(
     left_image,
     right_image,
     cached=None,
-    work_megapix=0.69,
+    work_megapix=0.00,
     seam_megapix=0.01,
     ba_refine_mask='_____',
-    finder=cv2.ORB.create(),
+    finder=cv2.xfeatures2d_SURF.create(),
+    matcher = cv2.detail.BestOf2NearestMatcher_create(False, 0.65),
     blender=cv2.detail.Blender_createDefault(cv2.detail.Blender_NO),
-    compensator=cv2.detail.ExposureCompensator_createDefault(cv2.detail.ExposureCompensator_NO),
-    seam_finder=cv2.detail.SeamFinder_createDefault(cv2.detail.SeamFinder_NO),
+    compensator=cv2.detail.ExposureCompensator_createDefault(2),
+    seam_finder=cv2.detail_GraphCutSeamFinder('COST_COLOR'),
     ):
     img_names = np.asarray([left_image,right_image])
-
-    """
-    https://docs.opencv.org/master/db/d27/tutorial_py_table_of_contents_feature2d.html
-
-    finder = cv2.xfeatures2d_SURF.create(), 
-    finder = cv2.ORB.create(),
-    finder = cv2.xfeatures2d_SIFT.create(),
-    finder = cv2.BRISK_create(),
-    finder = cv2.AKAZE_create(),
-    finder = cv2.FastFeatureDetector_create(),
-    """
     if cached is not None:
+        composetime = timer(start_time=None)
         dst_sz,warper, cameras,corners,masks_warped = cached
         blender.prepare(dst_sz)
         for idx, name in enumerate(img_names):
@@ -173,7 +164,17 @@ def Manual(
             blender.feed(cv2.UMat(image_warped.astype(np.int16)), mask_warped, corners[idx])
         result, result_mask = blender.blend(None, None)
         dst = cv2.normalize(src=result, dst=None, alpha=255., norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_8U)
+        timer(composetime)
         return False,dst
+    estimation_time = timer(start_time=None)     
+    """
+    finder = cv2.xfeatures2d_SURF.create() 
+    finder = cv2.ORB.create()
+    finder = cv2.xfeatures2d_SIFT.create()
+    finder = cv2.BRISK_create()
+    finder = cv2.AKAZE_create()
+    finder = cv2.FastFeatureDetector_create(),
+    """
         
     work_scale = min(1.0, np.sqrt(work_megapix * 1e6 / (left_image.shape[0] * left_image.shape[1]))) # because both image dimensions should be the same
     seam_scale = min(1.0, np.sqrt(seam_megapix * 1e6 / (left_image.shape[0] * left_image.shape[1])))
@@ -184,7 +185,6 @@ def Manual(
     images = np.asarray([cv2.resize(src=name, dsize=None, fx=seam_scale, fy=seam_scale, interpolation=cv2.INTER_LINEAR_EXACT) for name in img_names])
     
     # matcher = get_matcher(args)
-    matcher = cv2.detail.BestOf2NearestMatcher_create(False, 0.65)
     p = matcher.apply2(features)
     matcher.collectGarbage()
 
@@ -220,21 +220,51 @@ def Manual(
     rmats = cv2.detail.waveCorrect(rmats, cv2.detail.WAVE_CORRECT_HORIZ)
     for idx, cam in enumerate(cameras):cam.R = rmats[idx] # need to figure out how to vectorize cameras object
 
-    warper = cv2.PyRotationWarper('spherical', warped_image_scale * seam_work_aspect)  # warper could be nullptr?
-    masks = np.asarray([cv2.UMat(255 * np.ones((images[i].shape[0], images[i].shape[1]), np.uint8)) for i in range(img_names.shape[0])])
-    corners = np.asarray([warper.warp(images[idx], Kseam_work_aspect(cameras[idx].K().astype(np.float32),seam_work_aspect), cameras[idx].R, cv2.INTER_LINEAR, cv2.BORDER_REFLECT)[0] for idx in range(img_names.shape[0])])
-    masks_warped = np.asarray([warper.warp(masks[idx], Kseam_work_aspect(cameras[idx].K().astype(np.float32),seam_work_aspect), cameras[idx].R, cv2.INTER_NEAREST, cv2.BORDER_CONSTANT)[1].get() for idx in range(img_names.shape[0])]) 
-    images_warped = np.asarray([warper.warp(images[idx], Kseam_work_aspect(cameras[idx].K().astype(np.float32),seam_work_aspect), cameras[idx].R, cv2.INTER_LINEAR, cv2.BORDER_REFLECT)[1]for idx in range(img_names.shape[0])])
-    sizes = np.asarray([warper.warp(images[idx], Kseam_work_aspect(cameras[idx].K().astype(np.float32),seam_work_aspect), cameras[idx].R, cv2.INTER_LINEAR, cv2.BORDER_REFLECT)[1].shape[1::-1] for idx in range(img_names.shape[0])])
-    images_warped_f = np.asarray([img.astype(np.float32) for img in images_warped])
+    # warper = cv2.PyRotationWarper('spherical', warped_image_scale * seam_work_aspect)  # warper could be nullptr?
+    # masks = np.asarray([cv2.UMat(255 * np.ones((images[i].shape[0], images[i].shape[1]), np.uint8)) for i in range(img_names.shape[0])])
+    # corners = np.asarray([warper.warp(images[idx], Kseam_work_aspect(cameras[idx].K().astype(np.float32),seam_work_aspect), cameras[idx].R, cv2.INTER_LINEAR, cv2.BORDER_REFLECT)[0] for idx in range(img_names.shape[0])])
+    # sizes = np.asarray([warper.warp(images[idx], Kseam_work_aspect(cameras[idx].K().astype(np.float32),seam_work_aspect), cameras[idx].R, cv2.INTER_LINEAR, cv2.BORDER_REFLECT)[1].shape[1::-1] for idx in range(img_names.shape[0])])
+    # images_warped = np.asarray([warper.warp(images[idx], Kseam_work_aspect(cameras[idx].K().astype(np.float32),seam_work_aspect), cameras[idx].R, cv2.INTER_LINEAR, cv2.BORDER_REFLECT)[1]for idx in range(img_names.shape[0])])
+    # masks_warped = np.asarray([warper.warp(masks[idx], Kseam_work_aspect(cameras[idx].K().astype(np.float32),seam_work_aspect), cameras[idx].R, cv2.INTER_NEAREST, cv2.BORDER_CONSTANT)[1].get() for idx in range(img_names.shape[0])])
+    # images_warped_f = np.asarray([img.astype(np.float32) for img in images_warped])
+    corners = []
+    masks_warped = []
+    images_warped = []
+    sizes = []
+    masks = []
+    for i in range(img_names.shape[0]):
+        um = cv2.UMat(255 * np.ones((images[i].shape[0], images[i].shape[1]), np.uint8))
+        masks.append(um)
 
-    compensator.feed(corners=corners.tolist(), images=images_warped, masks=masks_warped) # .tolist()
-    seam_finder.find(images_warped_f, corners.tolist(), masks_warped)# .tolist()
+    warper = cv2.PyRotationWarper('spherical', warped_image_scale * seam_work_aspect)  # warper could be nullptr?
+    for idx in range(img_names.shape[0]):
+        K = cameras[idx].K().astype(np.float32)
+        swa = seam_work_aspect
+        K[0, 0] *= swa
+        K[0, 2] *= swa
+        K[1, 1] *= swa
+        K[1, 2] *= swa
+        corner, image_wp = warper.warp(images[idx], K, cameras[idx].R, cv2.INTER_LINEAR, cv2.BORDER_REFLECT)
+        corners.append(corner)
+        sizes.append((image_wp.shape[1], image_wp.shape[0]))
+        images_warped.append(image_wp)
+        p, mask_wp = warper.warp(masks[idx], K, cameras[idx].R, cv2.INTER_NEAREST, cv2.BORDER_CONSTANT)
+        masks_warped.append(mask_wp.get())
+
+    images_warped_f = []
+    for img in images_warped:
+        imgf = img.astype(np.float32)
+        images_warped_f.append(imgf)
+
+    # compensator = get_compensator(args)
+    compensator.feed(corners=corners, images=images_warped, masks=masks_warped) # .tolist()
+    # seam_finder = SEAM_FIND_CHOICES[args.seam]
+    seam_finder.find(images_warped_f, corners, masks_warped)# .tolist()
 
     warped_image_scale *= 1/work_scale
     warper = cv2.PyRotationWarper('spherical', warped_image_scale)
 
-    """calculate corner and size of time step"""
+    # """calculate corner and size of time step"""
     corners = []
     sizes = []
     for i in range(len(img_names)):
@@ -248,7 +278,6 @@ def Manual(
         sizes.append(roi[2:4])
 
     dst_sz = cv2.detail.resultRoi(corners=corners, sizes=sizes)
-    blend_width = np.sqrt(dst_sz[2] * dst_sz[3]) * 5 / 100
     blender.prepare(dst_sz)
 
     """Panorama construction step"""
@@ -262,5 +291,13 @@ def Manual(
     
     result, result_mask = blender.blend(None, None)
     dst = cv2.normalize(src=result, dst=None, alpha=255., norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_8U)
-    cached = (dst_sz,warper,cameras,corners,masks_warped)
-    return False,dst,cached
+    if dst.shape[0] in range(2000,2300) and dst.shape[1] in range(4700,5000):
+        cv2.imshow("Stitching result:{} --{}".format(dst.shape,work_megapix),imutils.resize(dst,width=1080))
+        cv2.waitKey(0)
+        cv2.destroyAllWindows()
+        cached = (dst_sz,warper,cameras,corners,masks_warped)
+        return False,dst,cached
+    print("--work_megapix {}, worked | shape {} | estimation time {}".format(work_megapix,dst.shape,timer(estimation_time)))
+
+    return True,dst,None
+

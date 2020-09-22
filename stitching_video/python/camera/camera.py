@@ -206,9 +206,17 @@ class Panorama:
                         stitch_start_time = time.time()
                     
                         if self.stitched_frames == 0 or self.to_estimate is True:
-                            status,pano,cached = self.stitcher(left_image,right_image)
+                            # status,pano,cached = self.stitcher(left_image,right_image)
                             # self.GPU.upload(pano)
-                            self.stitcher_cached = cached
+                            for work_megapix in np.arange(0.0,1.0,0.01):
+                                try:
+                                    status,pano,cached = self.stitcher(left_image,right_image,work_megapix=work_megapix)
+                                except Exception as e:
+                                    print(e)
+                                    continue
+                                if cached is not None:
+                                    self.stitcher_cached = cached
+                                    break
                             if status_check(status):
                                 print(CODES.INFO, "Transform successfully estimated")
                                 self.to_estimate = False
