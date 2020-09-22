@@ -230,8 +230,7 @@ def Manual(
     features = np.asarray([cv2.detail.computeImageFeatures2(finder,cv2.resize(src=name, dsize=None, fx=work_scale, fy=work_scale, interpolation=cv2.INTER_LINEAR_EXACT)) for name in img_names])
     images = np.asarray([cv2.resize(src=name, dsize=None, fx=seam_scale, fy=seam_scale, interpolation=cv2.INTER_LINEAR_EXACT) for name in img_names])
     
-    # matcher = get_matcher(args)
-    matcher = cv2.detail.BestOf2NearestMatcher_create(False, 0.65)
+    matcher = get_matcher(args)
     p = matcher.apply2(features)
     matcher.collectGarbage()
 
@@ -270,7 +269,9 @@ def Manual(
     warper = cv2.PyRotationWarper('spherical', warped_image_scale * seam_work_aspect)  # warper could be nullptr?
     masks = np.asarray([cv2.UMat(255 * np.ones((images[i].shape[0], images[i].shape[1]), np.uint8)) for i in range(img_names.shape[0])])
     corners = np.asarray([warper.warp(images[idx], Kseam_work_aspect(cameras[idx].K().astype(np.float32),seam_work_aspect), cameras[idx].R, cv2.INTER_LINEAR, cv2.BORDER_REFLECT)[0] for idx in range(img_names.shape[0])])
+    # images_warped = np.asarray([warper.warp(images[idx], Kseam_work_aspect(cameras[idx].K().astype(np.float32),seam_work_aspect), cameras[idx].R, cv.INTER_LINEAR, cv.BORDER_REFLECT)[1]for idx in range(img_names.shape[0])])
     # masks_warped = np.asarray([warper.warp(masks[idx], Kseam_work_aspect(cameras[idx].K().astype(np.float32),seam_work_aspect), cameras[idx].R, cv.INTER_NEAREST, cv.BORDER_CONSTANT)[1].get() for idx in range(img_names.shape[0])])
+    # images_warped_f = np.asarray([img.astype(np.float32) for img in images_warped])
     masks_warped = []
     images_warped = []
     for idx in range(img_names.shape[0]):
@@ -284,19 +285,15 @@ def Manual(
         images_warped.append(image_wp)
         p, mask_wp = warper.warp(masks[idx], K, cameras[idx].R, cv2.INTER_NEAREST, cv2.BORDER_CONSTANT)
         masks_warped.append(mask_wp.get())  
-    # images_warped = np.asarray([warper.warp(images[idx], Kseam_work_aspect(cameras[idx].K().astype(np.float32),seam_work_aspect), cameras[idx].R, cv.INTER_LINEAR, cv.BORDER_REFLECT)[1]for idx in range(img_names.shape[0])])
     sizes = np.asarray([warper.warp(images[idx], Kseam_work_aspect(cameras[idx].K().astype(np.float32),seam_work_aspect), cameras[idx].R, cv2.INTER_LINEAR, cv2.BORDER_REFLECT)[1].shape[1::-1] for idx in range(img_names.shape[0])])
-    # images_warped_f = np.asarray([img.astype(np.float32) for img in images_warped])
     images_warped_f = []
     for img in images_warped:
         imgf = img.astype(np.float32)
         images_warped_f.append(imgf)
 
-    # compensator = get_compensator(args) 
-    compensator = cv2.detail.ExposureCompensator_createDefault(cv2.detail.ExposureCompensator_GAIN_BLOCKS)
+    compensator = get_compensator(args) 
     compensator.feed(corners=corners.tolist(), images=images_warped, masks=masks_warped) # .tolist()
-    # seam_finder = SEAM_FIND_CHOICES[args.seam]
-    seam_finder = cv2.detail_GraphCutSeamFinder('COST_COLOR')
+    seam_finder = SEAM_FIND_CHOICES[args.seam]
     seam_finder.find(images_warped_f, corners.tolist(), masks_warped)# .tolist()
 
     warped_image_scale *= 1/work_scale
@@ -330,6 +327,7 @@ def Manual(
     
     result, result_mask = blender.blend(None, None)
     dst = cv2.normalize(src=result, dst=None, alpha=255., norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_8U)
+    print(dst.shape)
     cv2.imshow('stitched_image',imutils.resize(dst,width=1080))
     cv2.waitKey(0)
     return False,dst
@@ -339,5 +337,17 @@ if __name__ == '__main__':
     __doc__ += '\n' + parser.format_help()
     print(__doc__)
     left_image,right_image = cv2.imread(args.img_names[0]),cv2.imread(args.img_names[1])
-    Manual(left_image,right_image,args)
+    # Manual(left_image,right_image,args)
+    """
+    May tennis :good stitches around 2100 - 4700 in shape
+    June tennis :good stitches around 2200 - 4900 in shape;--work_megapix 0.38
+    """
+    for i in np.arange(0.0,1.0,0.01):
+        try:
+            Manual(left_image,right_image,work_megapix=i)
+            print("--work_megapix {} worked".format(i))
+        except Exception as e:
+            print(e)
+            continue
     cv2.destroyAllWindows()
+
