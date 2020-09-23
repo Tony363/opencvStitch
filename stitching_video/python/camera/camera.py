@@ -30,7 +30,7 @@ class CSI_Camera:
         self.read_lock = threading.Lock()
         self.running = False
         # Openv-python GPU object
-        # self.GPU = cv2.cuda_GpuMat()
+        self.GPU = cv2.cuda_GpuMat()
 
     # Open CSI-cameras with GStreamer
     # for mipi, filename is the gstreamer pipeline string returned by gstreamer.py
@@ -51,7 +51,7 @@ class CSI_Camera:
                 return
             # Grab the first frame to start the video capturing
             self.grabbed, self.frame = self.video_capture.read()
-            # self.GPU.upload(self.frame)
+            self.GPU.upload(self.frame)
 
         elif interface == "usb" or interface == "none":
             print("None",'\n')
@@ -80,11 +80,11 @@ class CSI_Camera:
 
             # Grab the first frame to start the video capturing
             self.grabbed,self.frame = self.video_capture.read()
-            # self.GPU.upload(self.frame)
+            self.GPU.upload(self.frame)
             # If the video is a file (interface == "none") the video must be manually resized before stitch
             if self.interface == "none" and self.grabbed:
                 self.frame = imutils.resize(self.frame, self.capture_width)
-                # self.GPU.upload(self.frame)
+                self.GPU.upload(self.frame)
             
     def start(self):
         if self.running:
@@ -107,14 +107,14 @@ class CSI_Camera:
         while self.running:
             try:
                 grabbed, frame = self.video_capture.read()
-                # self.GPU.upload(frame)
+                self.GPU.upload(frame)
                 if grabbed:
                     # If the video is a file (interface == "none") the video must be manually resized before stitch
                     if self.interface == "none":
-                        # frame = imutils.resize(self.GPU.download(), self.capture_width)
-                        frame = imutils.resize(frame,self.capture_width)
-                    # else:
-                    #     frame = self.GPU.download()                 
+                        frame = imutils.resize(self.GPU.download(), self.capture_width)
+                       # frame = imutils.resize(frame,self.capture_width)
+                    else:
+                         frame = self.GPU.download()                 
                     with self.read_lock:
                         self.grabbed=grabbed
                         self.frame=frame
@@ -152,7 +152,7 @@ class Panorama:
 
         # batched saving
         self.memory_store = np.asarray([])
-        # self.GPU = cv2.cuda_GpuMat()
+        self.GPU = cv2.cuda_GpuMat()
 
         # Initialize Stitcher class
         self.stitcher = Manual
@@ -206,8 +206,7 @@ class Panorama:
                         stitch_start_time = time.time()
                     
                         if self.stitched_frames == 0 or self.to_estimate is True:
-                            # status,pano,cached = self.stitcher(left_image,right_image)
-                            # self.GPU.upload(pano)
+                                                        
                             for work_megapix in np.arange(0.0,1.0,0.01):
                                 try:
                                     status,pano,cached = self.stitcher(left_image,right_image,work_megapix=work_megapix)
@@ -227,8 +226,8 @@ class Panorama:
                             if self.save:
                                 capL = self.left_camera.video_capture
                                 capR = self.right_camera.video_capture
-                                # h,w = self.GPU.download().shape[:2]
-                                h,w = pano.shape[:2] # Convert UMat to numpy array
+                                h,w = self.GPU.download().shape[:2]
+                                #h,w = pano.shape[:2] # Convert UMat to numpy array
                                 fps = min(capL.get(cv2.CAP_PROP_FPS),capR.get(cv2.CAP_PROP_FPS))
                                 fourcc = cv2.VideoWriter_fourcc(*'mp4v')
                                 
@@ -251,7 +250,7 @@ class Panorama:
                             compose_time = timer()
                             # status,pano, cached = self.stitcher(left_image,right_image)
                             status,pano = self.stitcher(left_image,right_image,self.stitcher_cached)
-                            # self.GPU.upload(pano)
+                            self.GPU.upload(pano)
                             timer(compose_time, "compose_time", self.timer)
                             if not status_check(status):
                                 print(CODES.ERROR, "composePanorama failed.") 
@@ -269,8 +268,8 @@ class Panorama:
 
                         with self.read_lock:
                             self.status=status
-                            # self.pano=self.GPU.download()
-                            self.pano=pano
+                            self.pano=self.GPU.download()
+                            #self.pano=pano
                             self.stitched_frames += 1
 
                 except RuntimeError:
@@ -281,8 +280,8 @@ class Panorama:
     def read(self):
         if self.pano is not None:
             with self.read_lock:
-                # pano = self.GPU.download().copy()
-                pano = self.pano
+                pano = self.GPU.download().copy()
+                #pano = self.pano
                 status = self.status
             return status, pano 
         else:

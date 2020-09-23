@@ -1,7 +1,7 @@
 import time
 # import the necessary packages
 import numpy as np
-import arrayfire as af
+#import arrayfire as af
 import imutils
 import cv2
 import faulthandler; faulthandler.enable()
@@ -291,12 +291,12 @@ def Manual(
     
     result, result_mask = blender.blend(None, None)
     dst = cv2.normalize(src=result, dst=None, alpha=255., norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_8U)
-    if dst.shape[0] in range(2000,2300) and dst.shape[1] in range(4700,5000):
-        cv2.imshow("Stitching result:{} --{}".format(dst.shape,work_megapix),imutils.resize(dst,width=1080))
-        cv2.waitKey(0)
-        cv2.destroyAllWindows()
-        cached = (dst_sz,warper,cameras,corners,masks_warped)
-        return False,dst,cached
+#    if dst.shape[0] in range(2000,2300) and dst.shape[1] in range(4700,5000):
+#    cv2.imshow("Stitching result:{} --{}".format(dst.shape,work_megapix),imutils.resize(dst,width=1080))
+#    cv2.waitKey(0)
+#    cv2.destroyAllWindows()
+    cached = (dst_sz,warper,cameras,corners,masks_warped)
+    return False,dst,cached
     print("--work_megapix {}, worked | shape {} | estimation time {}".format(work_megapix,dst.shape,timer(estimation_time)))
 
     return True,dst,None
