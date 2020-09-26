@@ -1,10 +1,10 @@
 import cv2 
 import numpy as np
-from numba import jit
+# from numba import jit
 import imutils
-from utils import timer
+# from utils import timer
 
-class Manual:
+class Stitcher:
     def __init__(self,left_image,right_image,work_megapix):
         
         """initial params"""
@@ -47,6 +47,9 @@ class Manual:
         self.masks = None
         self.images_warped_f = None
 
+    def new_frame(self,left_image,right_image):
+        self.img_names = np.asarray([left_image,right_image])
+
     def match_features(self):
         # matcher = get_matcher(args)
         p = self.matcher.apply2(self.features)
@@ -84,7 +87,11 @@ class Manual:
         adjuster.setConfThresh(1)
         adjuster.setRefinementMask(self.refine_mask)
         b, cameras = adjuster.apply(self.features,self.p,self.cameras)
-        focals = np.asarray([cam.focal for cam in self.cameras]) # might need np.sort()
+        # focals = np.asarray([cam.focal for cam in self.cameras]) # might need np.sort()
+        focals = []
+        for cam in cameras:
+            focals.append(cam.focal)
+        focals.sort()
         warped_image_scale = focals[len(focals) // 2] if len(focals) % 2 == 1 else (focals[len(focals) // 2] + focals[len(focals) // 2 - 1]) / 2
         rmats = np.asarray([np.copy(cam.R)for cam in self.cameras])
         rmats = cv2.detail.waveCorrect(rmats, cv2.detail.WAVE_CORRECT_HORIZ)
@@ -172,7 +179,7 @@ class Manual:
 
 def main(left_image,right_image,work_megapix):
     start_time = timer(start_time=None)
-    stitcher = Manual(left_image,right_image,work_megapix)
+    stitcher = Stitcher(left_image,right_image,work_megapix)
     stitcher.work_megapix = work_megapix
     stitcher.match_features()
     stitcher.refineMask()

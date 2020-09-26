@@ -299,7 +299,11 @@ def fine_adjustments(features,ba_refine_mask,p,cameras):
     adjuster.setRefinementMask(refine_mask(ba_refine_mask))
     b, cameras = adjuster.apply(features, p, cameras)
     
-    focals = np.asarray([cam.focal for cam in cameras]) # might need np.sort()
+    # focals = np.asarray([cam.focal for cam in cameras]) # might need np.sort()
+    focals = []
+    for cam in cameras:
+        focals.append(cam.focal)
+    focals.sort()
     
     warped_image_scale = focals[len(focals) // 2] if len(focals) % 2 == 1 else (focals[len(focals) // 2] + focals[len(focals) // 2 - 1]) / 2
     
@@ -399,7 +403,6 @@ if __name__ == '__main__':
     May tennis :good stitches around 2100 - 4700 in shape
     June tennis :good stitches around 2200 - 4900 in shape;--work_megapix 0.38
     """
-    # status,pano,cached = Manual(left_image,right_image,work_megapix=0.66)
     for i in np.arange(0.0,1.0,0.01):
         try:
             status,pano,cached = Manual(left_image,right_image,work_megapix=i)
