@@ -203,7 +203,7 @@ def get_compensator(args):
         compensator = cv2.detail.ExposureCompensator_createDefault(expos_comp_type)
     return compensator
 
-# @jit(nopython=False)
+@jit(nopython=False)
 def composePanorama(img_names,blender,compensator,cached):
     dst_sz,warper, cameras,corners,masks_warped = cached
     blender.prepare(dst_sz)
@@ -217,7 +217,7 @@ def composePanorama(img_names,blender,compensator,cached):
     dst = cv2.normalize(src=result, dst=None, alpha=255., norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_8U)
     return dst
 
-# @jit(nopython=False)
+@jit(nopython=False)
 def calculate_corners(img_names,cameras,full_img_sizes,work_scale,warper):
     corners = []
     sizes = []
@@ -232,7 +232,7 @@ def calculate_corners(img_names,cameras,full_img_sizes,work_scale,warper):
         sizes.append(roi[2:4])
     return corners,sizes
 
-# @jit(nopython=False)
+@jit(nopython=False)
 def corners_masks_sizes(warped_image_scale,seam_work_aspect,img_names,images,cameras):
     corners = []
     masks_warped = []
@@ -271,7 +271,7 @@ def refine_mask(ba_refine_mask):
         refine_mask[1, 2] = 1
     return refine_mask
 
-# @jit(nopython=True)
+@jit(nopython=True)
 def images_warpedf(images_warped):
     images_warped_f = []
     for img in images_warped:
@@ -352,7 +352,7 @@ def Manual(
     seam_work_aspect = seam_scale / work_scale
 
     full_img_sizes = np.asarray([(name.shape[1],name.shape[0]) for name in img_names])
-    features = np.asarray([def main():cv2.detail.computeImageFeatures2(finder,cv2.resize(src=name, dsize=None, fx=work_scale, fy=work_scale, interpolation=cv2.INTER_LINEAR_EXACT)) for name in img_names])
+    features = np.asarray([cv2.detail.computeImageFeatures2(finder,cv2.resize(src=name, dsize=None, fx=work_scale, fy=work_scale, interpolation=cv2.INTER_LINEAR_EXACT)) for name in img_names])
     images = np.asarray([cv2.resize(src=name, dsize=None, fx=seam_scale, fy=seam_scale, interpolation=cv2.INTER_LINEAR_EXACT) for name in img_names])
     
     p,cameras = match_features(matcher,features)
