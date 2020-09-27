@@ -20,7 +20,8 @@ class Stitcher:
         """GPU usage"""
         self.gpu_img_names = cv2.cuda_GpuMat(np.hstack([left_image,right_image]))
         self.gpu_corners = None
-        self.gpu_masks_warped = None
+        self.gpu_masks_warped_1 = None
+        self.gpu_masks_warped_2 = None
          
         """core transform matrix"""
         self.dst_sz = None
@@ -28,8 +29,6 @@ class Stitcher:
         self.p = None
         self.cameras = None
        
-       
-
         """aspect ratios"""
         self.work_scale = min(1.0, np.sqrt(self.work_megapix * 1e6 / (left_image.shape[0] * left_image.shape[1]))) # because both image dimensions should be the same
         self.seam_scale = min(1.0, np.sqrt(self.seam_megapix * 1e6 / (left_image.shape[0] * left_image.shape[1])))
@@ -129,8 +128,8 @@ class Stitcher:
         self.corners = corners
         self.gpu_corners = cv2.cuda_GpuMat(np.asarray(corners))
         self.masks_warped = masks_warped
-        print(np.asarray(masks_warped))
-        #self.gpu_masks_warped = cv2.cuda_GpuMat(np.asarray(masks_warped))
+        self.gpu_masks_warped_1 = cv2.cuda_GpuMat(masks_warped[0])
+        self.gpu_masks_warped_2 = cv2.cuda_GpuMat(masks_warped[1])
         self.images_warped = images_warped
         self.sizes = sizes
         self.masks = masks
