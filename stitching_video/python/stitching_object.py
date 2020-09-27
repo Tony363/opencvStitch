@@ -1,15 +1,13 @@
 import cv2 
 import numpy as np
-# from numba import jit
 import imutils
-# from utils import timer
+import pycuda.autoinit
+import pycuda.gpuarray as gpuarray
 
 class Stitcher:
     def __init__(self,left_image,right_image,work_megapix):
         
         """initial params"""
-        self.img_names = np.asarray([left_image,right_image])
-        self.cached = None
         self.work_megapix = work_megapix
         self.seam_megapix = 0.01
         self.ba_refine_mask = '_____'
@@ -18,26 +16,31 @@ class Stitcher:
         self.blender = cv2.detail.Blender_createDefault(cv2.detail.Blender_NO)
         self.compensator = cv2.detail.ExposureCompensator_createDefault(2)
         self.seam_finder = cv2.detail_GraphCutSeamFinder('COST_COLOR')
-
+       
+        """GPU usage"""
+        self.gpu_img_names = cv2.cuda_GpuMat(np.hstack([left_image,right_image]))
+        self.gpu_corners = None
+        self.gpu_masks_warped = None
+         
         """core transform matrix"""
         self.dst_sz = None
         self.warper = None
         self.p = None
         self.cameras = None
-        self.corners = None
-        self.masks_warped = None
+       
+       
 
         """aspect ratios"""
         self.work_scale = min(1.0, np.sqrt(self.work_megapix * 1e6 / (left_image.shape[0] * left_image.shape[1]))) # because both image dimensions should be the same
         self.seam_scale = min(1.0, np.sqrt(self.seam_megapix * 1e6 / (left_image.shape[0] * left_image.shape[1])))
         self.seam_work_aspect = self.work_scale / self.seam_scale
         self.warped_image_scale = None
-
+     
         """features and keypoints"""
-        self.full_img_sizes = np.asarray([(name.shape[1],name.shape[0]) for name in self.img_names])
-        self.features = np.asarray([cv2.detail.computeImageFeatures2(self.finder,cv2.resize(src=name, dsize=None, fx=self.work_scale, fy=self.work_scale, interpolation=cv2.INTER_LINEAR_EXACT)) for name in self.img_names])
-        self.images = np.asarray([cv2.resize(src=name, dsize=None, fx=self.seam_scale, fy=self.seam_scale, interpolation=cv2.INTER_LINEAR_EXACT) for name in self.img_names])
-
+        self.full_img_sizes = np.asarray([(name.shape[1],name.shape[0]) for name in np.array_split(self.gpu_img_names.download(),2,axis=1)])
+        self.features = np.asarray([cv2.detail.computeImageFeatures2(self.finder,cv2.resize(src=name, dsize=None, fx=self.work_scale, fy=self.work_scale, interpolation=cv2.INTER_LINEAR_EXACT)) for name in np.array_split(self.gpu_img_names.download(),2,axis=1)])
+        self.images = np.asarray([cv2.resize(src=name, dsize=None, fx=self.seam_scale, fy=self.seam_scale, interpolation=cv2.INTER_LINEAR_EXACT) for name in np.array_split(self.gpu_img_names.download(),2,axis=1)])
+        
         """constructor transform"""
         self.refine_mask = None
         self.corners = None
@@ -48,7 +51,7 @@ class Stitcher:
         self.images_warped_f = None
 
     def new_frame(self,left_image,right_image):
-        self.img_names = np.asarray([left_image,right_image])
+        self.gpu_img_names = cv2.cuda_GpuMat(np.hstack([left_image,right_image]))
 
     def match_features(self):
         # matcher = get_matcher(args)
@@ -62,9 +65,10 @@ class Stitcher:
         # cameras = np.asarray([cam.R.astype(np.float32) for cam in cameras])
         for cam in cameras:
             cam.R = cam.R.astype(np.float32) # need to figure out how to turn back from np to cv::detail::CameraParams object
+        
         self.cameras = cameras
         self.p = p
-        return p,cameras
+        return 
 
     def refineMask(self):
         refine_mask = np.zeros((3, 3), np.uint8)
@@ -108,7 +112,7 @@ class Stitcher:
         sizes = []
         masks = []
         warper = cv2.PyRotationWarper('spherical', self.warped_image_scale * self.seam_work_aspect)  # warper could be nullptr?
-        for idx in range(self.img_names.shape[0]):
+        for idx in range(2): # 2 being the number of images we stitch together
             um = cv2.UMat(255 * np.ones((self.images[idx].shape[0], self.images[idx].shape[1]), np.uint8))
             masks.append(um)
             K = self.cameras[idx].K().astype(np.float32)
@@ -123,7 +127,10 @@ class Stitcher:
             p, mask_wp = warper.warp(masks[idx], K, self.cameras[idx].R, cv2.INTER_NEAREST, cv2.BORDER_CONSTANT)
             masks_warped.append(mask_wp.get())
         self.corners = corners
+        self.gpu_corners = cv2.cuda_GpuMat(np.asarray(corners))
         self.masks_warped = masks_warped
+        print(np.asarray(masks_warped))
+        #self.gpu_masks_warped = cv2.cuda_GpuMat(np.asarray(masks_warped))
         self.images_warped = images_warped
         self.sizes = sizes
         self.masks = masks
@@ -139,9 +146,11 @@ class Stitcher:
     
     def get_warper(self):
         # compensator = get_compensator(args)
-        self.compensator.feed(corners=self.corners, images=self.images_warped, masks=self.masks_warped) # .tolist()
+        print("getting warper")
+        self.compensator.feed(corners=self.gpu_corners.download().tolist(), images=self.images_warped, masks=self.masks_warped) # .tolist()
+        print("success")
         # seam_finder = SEAM_FIND_CHOICES[args.seam]
-        self.seam_finder.find(self.images_warped_f, self.corners, self.masks_warped)# .tolist()
+        self.seam_finder.find(self.images_warped_f, self.gpu_corners.download().tolist(), self.masks_warped)# .tolist()
 
         self.warped_image_scale *= 1/self.work_scale
         self.warper = cv2.PyRotationWarper('spherical', self.warped_image_scale)
@@ -150,7 +159,7 @@ class Stitcher:
     def calculate_corners(self):
         corners = []
         sizes = []
-        for i in range(len(self.img_names)):
+        for i in range(2): # 2 being the number of images we stitch together
             self.cameras[i].focal *= 0.9999/self.work_scale
             self.cameras[i].ppx *= 1/self.work_scale
             self.cameras[i].ppy *= 1/self.work_scale
@@ -160,19 +169,22 @@ class Stitcher:
             corners.append(roi[0:2])
             sizes.append(roi[2:4])
         self.corners = corners
+        self.gpu_corners = cv2.cuda_GpuMat(np.asarray(corners))
         self.sizes = sizes
         self.dst_sz = cv2.detail.resultRoi(corners=corners, sizes=sizes)
         return corners,sizes
 
     def composePanorama(self):
-        # dst_sz,warper, cameras,corners,masks_warped = cached
+        print(self.corners,type(self.corners))
+        print(list(map(tuple,self.gpu_corners.download())),type(list(map(tuple,self.gpu_corners.download()))))
         self.blender.prepare(self.dst_sz)
-        for idx, name in enumerate(self.img_names):
+        for idx, name in enumerate(np.array_split(self.gpu_img_names.download(),2,axis=2)):
             corner, image_warped = self.warper.warp(name, self.cameras[idx].K().astype(np.float32), self.cameras[idx].R, cv2.INTER_LINEAR, cv2.BORDER_REFLECT)
             p, mask_warped = self.warper.warp(255 * np.ones((name.shape[0], name.shape[1]), np.uint8), self.cameras[idx].K().astype(np.float32), self.cameras[idx].R, cv2.INTER_NEAREST, cv2.BORDER_CONSTANT)
             self.compensator.apply(idx, self.corners[idx], image_warped, mask_warped)
+            #self.compensator.apply(idx, list(map(tuple,self.gpu_corners.download()))[idx], image_warped, mask_warped)
             mask_warped = cv2.bitwise_and(cv2.resize(cv2.dilate(self.masks_warped[idx], None), (mask_warped.shape[1],mask_warped.shape[0]), 0, 0, cv2.INTER_LINEAR_EXACT), mask_warped)
-            self.blender.feed(cv2.UMat(image_warped.astype(np.int16)), mask_warped, self.corners[idx])
+            self.blender.feed(cv2.UMat(image_warped.astype(np.int16)), mask_warped, self.gpu_corners.download()[idx])
         result, result_mask = self.blender.blend(None, None)
         dst = cv2.normalize(src=result, dst=None, alpha=255., norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_8U)
         return dst

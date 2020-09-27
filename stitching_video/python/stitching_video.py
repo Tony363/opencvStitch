@@ -19,7 +19,7 @@ import sys
 from utils import *
 from camera.camera import CSI_Camera,Panorama, get_minimum_total_frame, status_check
 from camera.gstreamer import gstreamer_pipeline
-from UMatFileVideoStream import UMatFileVideoStream
+
 
 # Stitching variables
 left_camera = None
@@ -114,7 +114,7 @@ def read_vid_thread(stitcher,interface,device0,device1,capture_width, capture_he
 
             if keyCode == ord('q'):
                 if SAVE:
-                    for idx,frame in enumerate(final_camera.memory_store):
+                    for idx,frame in enumerate(final_camera.memory_store.download()):
                         print(CODES.SAVED,frame,"Memory ",idx)
                         final_camera.out.write(frame)
                 print(CODES.INFO, "Successfully quit the program.")
