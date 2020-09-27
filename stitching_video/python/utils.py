@@ -1,12 +1,13 @@
 import time
 # import the necessary packages
 import numpy as np
-import arrayfire as af
-from numba import jit
+#import arrayfire as af
+#from numba import jit
 import imutils
 import cv2
 from stitching_object import Stitcher
 import faulthandler; faulthandler.enable()
+
 class CODES:
     INFO = "[INFO]"
     ERROR = "[ERROR]"

@@ -166,6 +166,7 @@ class Stitcher:
 
     def composePanorama(self):
         # dst_sz,warper, cameras,corners,masks_warped = cached
+        print(self.corners,type(self.corners))
         self.blender.prepare(self.dst_sz)
         for idx, name in enumerate(self.img_names):
             corner, image_warped = self.warper.warp(name, self.cameras[idx].K().astype(np.float32), self.cameras[idx].R, cv2.INTER_LINEAR, cv2.BORDER_REFLECT)
