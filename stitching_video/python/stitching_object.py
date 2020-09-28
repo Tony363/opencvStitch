@@ -22,6 +22,8 @@ class Stitcher:
         self.gpu_corners = None
         self.gpu_masks_warped_1 = None
         self.gpu_masks_warped_2 = None
+        self.gpu_images_warped_1 = None
+        self.gpu_images_warped_2 = None
          
         """core transform matrix"""
         self.dst_sz = None
@@ -53,7 +55,6 @@ class Stitcher:
         self.gpu_img_names = cv2.cuda_GpuMat(np.hstack([left_image,right_image]))
 
     def match_features(self):
-        # matcher = get_matcher(args)
         p = self.matcher.apply2(self.features)
         self.matcher.collectGarbage()
 
@@ -125,35 +126,33 @@ class Stitcher:
             images_warped.append(image_wp)
             p, mask_wp = warper.warp(masks[idx], K, self.cameras[idx].R, cv2.INTER_NEAREST, cv2.BORDER_CONSTANT)
             masks_warped.append(mask_wp.get())
-        self.corners = corners
         self.gpu_corners = cv2.cuda_GpuMat(np.asarray(corners))
-        self.masks_warped = masks_warped
         self.gpu_masks_warped_1 = cv2.cuda_GpuMat(masks_warped[0])
         self.gpu_masks_warped_2 = cv2.cuda_GpuMat(masks_warped[1])
-        self.images_warped = images_warped
+        self.gpu_images_warped_1 = cv2.cuda_GpuMat(images_warped[0])
+        self.gpu_images_warped_2 = cv2.cuda_GpuMat(images_warped[1])
         self.sizes = sizes
         self.masks = masks
-        return corners,masks_warped,images_warped,sizes,masks
+        self.corners = corners
+        return 
     
     def images_warpedf(self):
         images_warped_f = []
-        for img in self.images_warped:
+        for img in np.asarray([self.gpu_images_warped_1.download(),self.gpu_images_warped_2.download()]):
             imgf = img.astype(np.float32)
             images_warped_f.append(imgf)
         self.images_warped_f = images_warped_f
         return images_warped_f
     
     def get_warper(self):
-        # compensator = get_compensator(args)
-        print("getting warper")
-        self.compensator.feed(corners=self.gpu_corners.download().tolist(), images=self.images_warped, masks=self.masks_warped) # .tolist()
-        print("success")
-        # seam_finder = SEAM_FIND_CHOICES[args.seam]
+        corners = list(map(tuple,self.gpu_corners.download()))
+        print(corners == self.corners) # WTF don't know why it can't use the downloaded version
+        self.compensator.feed(corners=self.corners, images=[self.gpu_images_warped_1.download(),self.gpu_images_warped_2.download()], masks=[self.gpu_masks_warped_1.download(),self.gpu_masks_warped_2.download()]) # .tolist()
         self.seam_finder.find(self.images_warped_f, self.gpu_corners.download().tolist(), self.masks_warped)# .tolist()
 
         self.warped_image_scale *= 1/self.work_scale
         self.warper = cv2.PyRotationWarper('spherical', self.warped_image_scale)
-        return self.warper  
+        return   
 
     def calculate_corners(self):
         corners = []
@@ -171,19 +170,19 @@ class Stitcher:
         self.gpu_corners = cv2.cuda_GpuMat(np.asarray(corners))
         self.sizes = sizes
         self.dst_sz = cv2.detail.resultRoi(corners=corners, sizes=sizes)
-        return corners,sizes
+        return 
 
     def composePanorama(self):
-        print(self.corners,type(self.corners))
-        print(list(map(tuple,self.gpu_corners.download())),type(list(map(tuple,self.gpu_corners.download()))))
         self.blender.prepare(self.dst_sz)
-        for idx, name in enumerate(np.array_split(self.gpu_img_names.download(),2,axis=2)):
+        #resize = cv2.resize(cv2.dilate(np.asarray([self.gpu_masks_warped_1.download(),self.gpu_masks_warped_2.download()])[idx], None),(mask_warped.shape[1],mask_warped.shape[0]), 0, 0, cv2.INTER_LINEAR_EXACT), mask_warped)
+        for idx, name in enumerate(np.array_split(self.gpu_img_names.download(),2,axis=1)):
             corner, image_warped = self.warper.warp(name, self.cameras[idx].K().astype(np.float32), self.cameras[idx].R, cv2.INTER_LINEAR, cv2.BORDER_REFLECT)
             p, mask_warped = self.warper.warp(255 * np.ones((name.shape[0], name.shape[1]), np.uint8), self.cameras[idx].K().astype(np.float32), self.cameras[idx].R, cv2.INTER_NEAREST, cv2.BORDER_CONSTANT)
-            self.compensator.apply(idx, self.corners[idx], image_warped, mask_warped)
-            #self.compensator.apply(idx, list(map(tuple,self.gpu_corners.download()))[idx], image_warped, mask_warped)
-            mask_warped = cv2.bitwise_and(cv2.resize(cv2.dilate(self.masks_warped[idx], None), (mask_warped.shape[1],mask_warped.shape[0]), 0, 0, cv2.INTER_LINEAR_EXACT), mask_warped)
-            self.blender.feed(cv2.UMat(image_warped.astype(np.int16)), mask_warped, self.gpu_corners.download()[idx])
+            self.compensator.apply(idx, list(map(tuple,self.gpu_corners.download()))[idx], image_warped,mask_warped)
+            #resize = cv2.resize(cv2.dilate(np.asarray([self.gpu_masks_warped_1.download(),self.gpu_masks_warped_2.download()])[idx], None),(mask_warped.shape[1],mask_warped.shape[0])
+
+            mask_warped = cv2.bitwise_and(cv2.resize(cv2.dilate(np.asarray([self.gpu_masks_warped_1.download(),self.gpu_masks_warped_2.download()])[idx], None), (mask_warped.shape[1],mask_warped.shape[0]), 0, 0, cv2.INTER_LINEAR_EXACT), mask_warped)
+            self.blender.feed(cv2.UMat(image_warped.astype(np.int16)), mask_warped, list(map(tuple,self.gpu_corners.download()))[idx])
         result, result_mask = self.blender.blend(None, None)
         dst = cv2.normalize(src=result, dst=None, alpha=255., norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_8U)
         return dst
