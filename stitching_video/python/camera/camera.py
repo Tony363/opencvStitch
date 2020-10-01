@@ -11,7 +11,8 @@ sys.path.append(path.dirname(path.dirname(__file__)))
 
 from math import ceil
 from utils import *
-# from detail_stitch import *
+from stitching_object import Stitcher
+
 class CSI_Camera:
 
     def __init__ (self,interface,capture_width, capture_height) :
@@ -112,9 +113,9 @@ class CSI_Camera:
                     # If the video is a file (interface == "none") the video must be manually resized before stitch
                     if self.interface == "none":
                         frame = imutils.resize(self.GPU.download(), self.capture_width)
-                       # frame = imutils.resize(frame,self.capture_width)
+                        #frame = imutils.resize(frame,self.capture_width)
                     else:
-                         frame = self.GPU.download()                 
+                        frame = self.GPU.download()                 
                     with self.read_lock:
                         self.grabbed=grabbed
                         self.frame=frame
@@ -151,12 +152,11 @@ class Panorama:
         self.fps_array = collections.deque(maxlen=5) # Store processing time for last 5 frames to estimate video writer FPS
 
         # batched saving
-        self.memory_store = np.asarray([])
+        self.memory_store = cv2.cuda_GpuMat()
         self.GPU = cv2.cuda_GpuMat()
 
         # Initialize Stitcher class
-        self.stitcher = Manual
-        self.stitcher_cached = None
+        self.stitcher = Stitcher
         self.to_estimate = None
         self.stitched_frames = 0
         self.timer = timer
@@ -198,7 +198,7 @@ class Panorama:
                     # Initialize left and right frames
                     # CSI cameras frames works on 30 or 60 FPS but the sticher works under 3FPS (slower)
                     # Therefore it needs to store a frame for a longer period of time to be able to stitch
-                    # if (self.left_camera.frame is not None and self.right_camera.frame is not None) or self.GPU:
+                    
                     if (self.left_camera.frame is not None and self.right_camera.frame is not None):
                         _, left_image = self.left_camera.read()
                         _, right_image = self.right_camera.read()
@@ -206,16 +206,17 @@ class Panorama:
                         stitch_start_time = time.time()
                     
                         if self.stitched_frames == 0 or self.to_estimate is True:
-                                                        
-                            for work_megapix in np.arange(0.0,1.0,0.01):
-                                try:
-                                    status,pano,cached = self.stitcher(left_image,right_image,work_megapix=work_megapix)
-                                except Exception as e:
-                                    print(e)
-                                    continue
-                                if cached is not None:
-                                    self.stitcher_cached = cached
-                                    break
+                            #for work_megapix in np.arange(0.01,1.0,0.01):
+                                #try:
+                            status,pano,stitcher = estimateTransform(left_image,right_image,work_megapix=0.6)
+                            self.stitcher = stitcher
+                            self.GPU.upload(pano)
+                                    #break
+                                    # if pano.shape[0] in range(2000,2300) and pano.shape[1] in range(4700,5000):
+                                    #     break
+                                #except Exception as e:
+                                    #print(e)
+                                    #continue
                             if status_check(status):
                                 print(CODES.INFO, "Transform successfully estimated")
                                 self.to_estimate = False
@@ -248,8 +249,8 @@ class Panorama:
                                 break
 
                             compose_time = timer()
-                            # status,pano, cached = self.stitcher(left_image,right_image)
-                            status,pano = self.stitcher(left_image,right_image,self.stitcher_cached)
+                            self.stitcher.new_frame(left_image,right_image)
+                            pano = self.stitcher.composePanorama()
                             self.GPU.upload(pano)
                             timer(compose_time, "compose_time", self.timer)
                             if not status_check(status):
@@ -263,9 +264,8 @@ class Panorama:
                         self.fps_array.append(1/excution_time)
                         readFrame += 1
                         if self.save and self.out is not None:
-                            self.memory_store = np.append(self.memory_store,cv2.UMat(pano))
-                          
-
+                            self.memory_store.upload(cv2.UMat(pano))
+                            #print(self.memory_store.size())
                         with self.read_lock:
                             self.status=status
                             self.pano=self.GPU.download()
@@ -297,15 +297,4 @@ class Panorama:
 
 
 
-def get_minimum_total_frame(left_capture, right_capture):
-    left_total_frame = int(left_capture.get(cv2.CAP_PROP_FRAME_COUNT))
-    right_total_frame = int(right_capture.get(cv2.CAP_PROP_FRAME_COUNT))
-    total_frame = min(left_total_frame, right_total_frame)
-    print(CODES.INFO, "Total frames set to {}".format(total_frame))
-    return total_frame
 
-def status_check(status):
-    if status != cv2.Stitcher_OK:
-        print("Can't stitch images, error code = {}".format(status))
-        return False
-    return True
