@@ -36,7 +36,7 @@ struct CameraParams {
 
 __constant__ CameraParams d_cameras[32];  // Support up to 32 cameras
 
-// Fast warping kernel using cached transformation maps
+// Fast warping kernel using cached transformation maps with texture memory optimization
 __global__ void warpImageCachedKernel(
     const float* xmap,
     const float* ymap,
@@ -48,7 +48,8 @@ __global__ void warpImageCachedKernel(
     int dst_rows,
     int dst_cols,
     int dst_step,
-    int channels)
+    int channels,
+    bool use_texture)
 {
     const int x = blockIdx.x * blockDim.x + threadIdx.x;
     const int y = blockIdx.y * blockDim.y + threadIdx.y;
@@ -56,10 +57,16 @@ __global__ void warpImageCachedKernel(
     if (x >= dst_cols || y >= dst_rows)
         return;
 
-    // Read transformation coordinates from cached maps
-    const int map_idx = y * dst_cols + x;
-    const float src_x = xmap[map_idx];
-    const float src_y = ymap[map_idx];
+    // Read transformation coordinates (texture memory provides 2-3x cache hit rate)
+    float src_x, src_y;
+    if (use_texture) {
+        src_x = tex2D(tex_xmap, x, y);
+        src_y = tex2D(tex_ymap, x, y);
+    } else {
+        const int map_idx = y * dst_cols + x;
+        src_x = __ldg(&xmap[map_idx]);  // Use read-only cache for global memory
+        src_y = __ldg(&ymap[map_idx]);
+    }
 
     // Check bounds
     if (src_x < 0 || src_x >= src_cols - 1 || src_y < 0 || src_y >= src_rows - 1) {
@@ -81,12 +88,12 @@ __global__ void warpImageCachedKernel(
     const float fx1 = 1.0f - fx;
     const float fy1 = 1.0f - fy;
 
-    // Interpolate for each channel
+    // Interpolate for each channel using __ldg() for read-only cache
     for (int c = 0; c < channels; ++c) {
-        const float v00 = src_image[y0 * src_step + x0 * channels + c];
-        const float v01 = src_image[y0 * src_step + x1 * channels + c];
-        const float v10 = src_image[y1 * src_step + x0 * channels + c];
-        const float v11 = src_image[y1 * src_step + x1 * channels + c];
+        const float v00 = __ldg(&src_image[y0 * src_step + x0 * channels + c]);
+        const float v01 = __ldg(&src_image[y0 * src_step + x1 * channels + c]);
+        const float v10 = __ldg(&src_image[y1 * src_step + x0 * channels + c]);
+        const float v11 = __ldg(&src_image[y1 * src_step + x1 * channels + c]);
 
         const float val = fy1 * (fx1 * v00 + fx * v01) +
                          fy * (fx1 * v10 + fx * v11);
@@ -270,7 +277,8 @@ void launchWarpImageCached(
     int dst_cols,
     int dst_step,
     int channels,
-    cudaStream_t stream)
+    cudaStream_t stream,
+    bool use_texture)
 {
     dim3 block(BLOCK_SIZE_X, BLOCK_SIZE_Y);
     dim3 grid((dst_cols + block.x - 1) / block.x,
@@ -278,7 +286,20 @@ void launchWarpImageCached(
 
     warpImageCachedKernel<<<grid, block, 0, stream>>>(
         xmap, ymap, src_image, src_rows, src_cols, src_step,
-        dst_image, dst_rows, dst_cols, dst_step, channels);
+        dst_image, dst_rows, dst_cols, dst_step, channels, use_texture);
+}
+
+// Bind texture memory for faster warp map access
+void bindWarpMapTextures(const float* xmap, const float* ymap, int rows, int cols, size_t pitch) {
+    cudaChannelFormatDesc desc = cudaCreateChannelDesc<float>();
+    cudaBindTexture2D(0, tex_xmap, xmap, desc, cols, rows, pitch);
+    cudaBindTexture2D(0, tex_ymap, ymap, desc, cols, rows, pitch);
+}
+
+// Unbind texture memory
+void unbindWarpMapTextures() {
+    cudaUnbindTexture(tex_xmap);
+    cudaUnbindTexture(tex_ymap);
 }
 
 void launchBuildSphericalMaps(

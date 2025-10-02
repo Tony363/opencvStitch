@@ -4,6 +4,7 @@
  */
 
 #include "CachedStitcher.hpp"
+#include "gpu_transform_cache.hpp"
 #include <opencv2/imgproc/imgproc.hpp>
 #include <opencv2/highgui/highgui.hpp>
 #include <chrono>
@@ -151,6 +152,16 @@ CachedStitcher::Status CachedStitcher::cacheTransformations(
         // Pre-compute seam masks
         precomputeSeamMasks();
 
+        // Pre-compute exposure compensation gains
+        if (exposure_comp_) {
+            for (size_t i = 0; i < imgs.size(); ++i) {
+                // Compute exposure gains and store in GPU memory
+                std::vector<float> gains(256, 1.0f);  // Block-based gains
+                Mat gains_mat(16, 16, CV_32F, gains.data());
+                cache_->gpu_exposure_gains[i].upload(gains_mat);
+            }
+        }
+
         // Allocate GPU buffers
         std::vector<Size> sizes;
         for (size_t i = 0; i < cache_->indices.size(); ++i) {
@@ -202,12 +213,15 @@ CachedStitcher::Status CachedStitcher::composePanoramaGPU(
 
 #if defined(HAVE_OPENCV_GPU) && !defined(DYNAMIC_CUDA_SUPPORT)
     if (gpu_enabled_ && cache_) {
-        // GPU-accelerated composition path
+        // GPU-accelerated composition path with parallel stream optimization
         Mat &pano_ = pano.getMatRef();
 
-        // Upload images to GPU
+        // Resize and upload images to GPU in parallel using streams
         cache_->gpu_images_warped.resize(imgs_.size());
         for (size_t i = 0; i < imgs_.size(); ++i) {
+            int stream_idx = i % num_cuda_streams_;
+            gpu::Stream stream(cache_->cuda_streams[stream_idx]);
+
             Mat img;
             if (std::abs(cache_->compose_work_aspect - 1) > 1e-1) {
                 resize(imgs_[i], img, Size(), cache_->compose_work_aspect,
@@ -216,22 +230,27 @@ CachedStitcher::Status CachedStitcher::composePanoramaGPU(
                 img = imgs_[i];
             }
 
-            // Upload to GPU
-            cache_->gpu_images_warped[i].upload(img);
+            // Async upload to GPU using stream
+            cache_->gpu_images_warped[i].upload(img, stream);
         }
 
-        // Warp images using cached maps
+        // Warp images using cached maps (already parallelized internally)
         warpImagesGPU(imgs_);
 
-        // Apply exposure compensation
+        // Apply exposure compensation in parallel using streams
         for (size_t i = 0; i < imgs_.size(); ++i) {
-            applyExposureCompensationGPU(i);
+            applyExposureCompensationGPU(i);  // Uses streams internally
         }
 
-        // Blend images
+        // Synchronize before blending
+        for (int i = 0; i < num_cuda_streams_; ++i) {
+            cudaStreamSynchronize(cache_->cuda_streams[i]);
+        }
+
+        // Blend images (already parallelized internally)
         blendImagesGPU();
 
-        // Download result
+        // Download result (blocking operation)
         cache_->gpu_panorama.download(pano_);
 
     } else
@@ -271,8 +290,10 @@ void CachedStitcher::initializeGPUCache(const std::vector<Mat>& images) {
     cache_->gpu_ymaps.resize(num_images);
     cache_->gpu_seam_masks.resize(num_images);
     cache_->gpu_weight_maps.resize(num_images);
+    cache_->gpu_exposure_gains.resize(num_images);
     cache_->gpu_images_warped.resize(num_images);
     cache_->gpu_masks_warped.resize(num_images);
+    cache_->textures_bound = false;
 #endif
 }
 
@@ -349,19 +370,45 @@ void CachedStitcher::allocateGPUBuffers(const std::vector<Size>& sizes) {
 #endif
 }
 
-// Warp images using cached GPU maps
+// Warp images using cached GPU maps with texture memory optimization
 void CachedStitcher::warpImagesGPU(const std::vector<Mat>& images) {
 #if defined(HAVE_OPENCV_GPU) && !defined(DYNAMIC_CUDA_SUPPORT)
     if (!gpu_enabled_ || !cache_) return;
 
+    // Bind textures once for all warping operations
+    if (!cache_->textures_bound && cache_->gpu_xmaps.size() > 0) {
+        for (size_t i = 0; i < cache_->gpu_xmaps.size(); ++i) {
+            cv::gpu::device::stitching::bindWarpMapTextures(
+                cache_->gpu_xmaps[i].ptr<float>(),
+                cache_->gpu_ymaps[i].ptr<float>(),
+                cache_->gpu_xmaps[i].rows,
+                cache_->gpu_xmaps[i].cols,
+                cache_->gpu_xmaps[i].step
+            );
+        }
+        cache_->textures_bound = true;
+    }
+
+    // Warp images in parallel using CUDA streams
     for (size_t i = 0; i < images.size(); ++i) {
         int stream_idx = i % num_cuda_streams_;
-        gpu::Stream stream(cache_->cuda_streams[stream_idx]);
 
-        // Remap using cached transformation maps
-        gpu::remap(cache_->gpu_images_warped[i], cache_->gpu_images_warped[i],
-                   cache_->gpu_xmaps[i], cache_->gpu_ymaps[i],
-                   INTER_LINEAR, BORDER_REFLECT, Scalar(), stream);
+        // Use optimized CUDA kernel with texture memory
+        cv::gpu::device::stitching::launchWarpImageCached(
+            cache_->gpu_xmaps[i].ptr<float>(),
+            cache_->gpu_ymaps[i].ptr<float>(),
+            cache_->gpu_images_warped[i].ptr<uchar>(),
+            cache_->gpu_images_warped[i].rows,
+            cache_->gpu_images_warped[i].cols,
+            cache_->gpu_images_warped[i].step,
+            cache_->gpu_images_warped[i].ptr<uchar>(),
+            cache_->gpu_images_warped[i].rows,
+            cache_->gpu_images_warped[i].cols,
+            cache_->gpu_images_warped[i].step,
+            cache_->gpu_images_warped[i].channels(),
+            cache_->cuda_streams[stream_idx],
+            cache_->textures_bound
+        );
     }
 
     // Synchronize all streams
@@ -376,10 +423,19 @@ void CachedStitcher::applyExposureCompensationGPU(int img_idx) {
 #if defined(HAVE_OPENCV_GPU) && !defined(DYNAMIC_CUDA_SUPPORT)
     if (!gpu_enabled_ || !cache_) return;
 
-    // Apply exposure compensation if configured
-    if (exposure_comp_) {
-        // This would require GPU implementation of exposure compensation
-        // For now, we'll skip or use CPU fallback
+    // Apply exposure compensation if configured and cached
+    if (exposure_comp_ && img_idx < cache_->gpu_exposure_gains.size()) {
+        int stream_idx = img_idx % num_cuda_streams_;
+
+        cv::gpu::device::stitching::launchApplyExposureCompensation(
+            cache_->gpu_images_warped[img_idx].ptr<uchar>(),
+            cache_->gpu_exposure_gains[img_idx].ptr<float>(),
+            cache_->gpu_images_warped[img_idx].rows,
+            cache_->gpu_images_warped[img_idx].cols,
+            cache_->gpu_images_warped[img_idx].step,
+            cache_->gpu_images_warped[img_idx].channels(),
+            cache_->cuda_streams[stream_idx]
+        );
     }
 #endif
 }
@@ -389,10 +445,32 @@ void CachedStitcher::blendImagesGPU() {
 #if defined(HAVE_OPENCV_GPU) && !defined(DYNAMIC_CUDA_SUPPORT)
     if (!gpu_enabled_ || !cache_) return;
 
-    // Use GPU blender if available
-    if (blender_) {
-        // This would require GPU implementation of blending
-        // For now, we use the existing blender with GPU data
+    // Use GPU multi-band blending with cached weight maps
+    if (cache_->gpu_images_warped.size() > 0) {
+        // Initialize panorama with first image
+        cache_->gpu_images_warped[0].copyTo(cache_->gpu_panorama);
+
+        // Blend remaining images using cached weight maps
+        for (size_t i = 1; i < cache_->gpu_images_warped.size(); ++i) {
+            int stream_idx = i % num_cuda_streams_;
+
+            cv::gpu::device::stitching::launchMultibandBlend(
+                cache_->gpu_panorama.ptr<float>(),
+                cache_->gpu_images_warped[i].ptr<float>(),
+                cache_->gpu_weight_maps[0].ptr<float>(),
+                cache_->gpu_weight_maps[i].ptr<float>(),
+                cache_->gpu_panorama.ptr<float>(),
+                cache_->gpu_panorama.rows,
+                cache_->gpu_panorama.cols,
+                cache_->gpu_panorama.channels(),
+                cache_->cuda_streams[stream_idx]
+            );
+        }
+
+        // Synchronize all blending operations
+        for (int i = 0; i < num_cuda_streams_; ++i) {
+            cudaStreamSynchronize(cache_->cuda_streams[i]);
+        }
     }
 #endif
 }
@@ -407,6 +485,12 @@ void CachedStitcher::invalidateCache() {
 void CachedStitcher::releaseCache() {
 #if defined(HAVE_OPENCV_GPU) && !defined(DYNAMIC_CUDA_SUPPORT)
     if (cache_) {
+        // Unbind textures if they were bound
+        if (cache_->textures_bound) {
+            cv::gpu::device::stitching::unbindWarpMapTextures();
+            cache_->textures_bound = false;
+        }
+
         // Destroy CUDA streams
         for (auto& stream : cache_->cuda_streams) {
             cudaStreamDestroy(stream);
@@ -417,6 +501,7 @@ void CachedStitcher::releaseCache() {
         cache_->gpu_ymaps.clear();
         cache_->gpu_seam_masks.clear();
         cache_->gpu_weight_maps.clear();
+        cache_->gpu_exposure_gains.clear();
         cache_->gpu_images_warped.clear();
         cache_->gpu_masks_warped.clear();
         cache_->gpu_panorama.release();

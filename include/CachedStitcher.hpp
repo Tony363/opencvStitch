@@ -93,6 +93,7 @@ private:
         std::vector<gpu::GpuMat> gpu_ymaps;
         std::vector<gpu::GpuMat> gpu_seam_masks;
         std::vector<gpu::GpuMat> gpu_weight_maps;
+        std::vector<gpu::GpuMat> gpu_exposure_gains;  // Cached exposure compensation gains
 
         // Pre-allocated GPU buffers
         std::vector<gpu::GpuMat> gpu_images_warped;
@@ -101,6 +102,9 @@ private:
 
         // CUDA streams for parallel processing
         std::vector<cudaStream_t> cuda_streams;
+
+        // Texture binding state
+        bool textures_bound;
 #endif
     };
 
