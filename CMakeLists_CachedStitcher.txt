@@ -1,0 +1,140 @@
+# CMake configuration for CachedStitcher GPU-accelerated real-time stitching
+# Add this to your main CMakeLists.txt or create a separate module
+
+cmake_minimum_required(VERSION 2.8.12.2)
+
+# Find required packages
+find_package(CUDA REQUIRED)
+find_package(OpenCV REQUIRED)
+
+# Set CUDA compilation flags
+set(CUDA_NVCC_FLAGS ${CUDA_NVCC_FLAGS}
+    -gencode arch=compute_30,code=sm_30
+    -gencode arch=compute_35,code=sm_35
+    -gencode arch=compute_50,code=sm_50
+    -gencode arch=compute_52,code=sm_52
+    -gencode arch=compute_60,code=sm_60
+    -gencode arch=compute_61,code=sm_61
+    -gencode arch=compute_70,code=sm_70
+    -gencode arch=compute_75,code=sm_75
+)
+
+# Enable fast math for better performance
+set(CUDA_NVCC_FLAGS ${CUDA_NVCC_FLAGS} -use_fast_math)
+
+# Set C++ standard
+set(CMAKE_CXX_STANDARD 11)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+# Include directories
+include_directories(
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/modules/stitching/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/modules/gpu/include
+    ${OpenCV_INCLUDE_DIRS}
+    ${CUDA_INCLUDE_DIRS}
+)
+
+# Source files
+set(CACHED_STITCHER_SOURCES
+    src/CachedStitcher.cpp
+)
+
+set(CACHED_STITCHER_HEADERS
+    include/CachedStitcher.hpp
+)
+
+# CUDA source files
+cuda_add_library(gpu_transform_cache
+    src/gpu_transform_cache.cu
+)
+
+# Create CachedStitcher library
+add_library(cached_stitcher SHARED
+    ${CACHED_STITCHER_SOURCES}
+    ${CACHED_STITCHER_HEADERS}
+)
+
+# Link libraries
+target_link_libraries(cached_stitcher
+    ${OpenCV_LIBS}
+    gpu_transform_cache
+    ${CUDA_LIBRARIES}
+    ${CUDA_CUBLAS_LIBRARIES}
+    ${CUDA_cufft_LIBRARY}
+)
+
+# Add compile definitions
+target_compile_definitions(cached_stitcher PRIVATE
+    HAVE_OPENCV_GPU
+    HAVE_CUDA
+)
+
+# Build examples
+add_executable(realtime_stitching
+    examples/realtime_stitching.cpp
+)
+
+target_link_libraries(realtime_stitching
+    cached_stitcher
+    ${OpenCV_LIBS}
+)
+
+# Build tests (optional)
+if(BUILD_TESTS)
+    add_executable(test_cached_stitcher
+        test/test_cached_stitcher.cpp
+    )
+
+    target_link_libraries(test_cached_stitcher
+        cached_stitcher
+        ${OpenCV_LIBS}
+    )
+endif()
+
+# Installation rules
+install(TARGETS cached_stitcher
+    LIBRARY DESTINATION lib
+    ARCHIVE DESTINATION lib
+)
+
+install(FILES ${CACHED_STITCHER_HEADERS}
+    DESTINATION include/opencv2/stitching
+)
+
+install(TARGETS realtime_stitching
+    RUNTIME DESTINATION bin
+)
+
+# Print configuration summary
+message(STATUS "==============================================")
+message(STATUS "CachedStitcher Configuration Summary:")
+message(STATUS "  CUDA Version: ${CUDA_VERSION}")
+message(STATUS "  OpenCV Version: ${OpenCV_VERSION}")
+message(STATUS "  CUDA Libraries: ${CUDA_LIBRARIES}")
+message(STATUS "  NVCC Flags: ${CUDA_NVCC_FLAGS}")
+message(STATUS "==============================================")
+
+# Custom build options
+option(CACHED_STITCHER_USE_FAST_MATH "Use fast math optimizations" ON)
+option(CACHED_STITCHER_ENABLE_PROFILING "Enable CUDA profiling" OFF)
+option(CACHED_STITCHER_BUILD_BENCHMARKS "Build benchmark applications" OFF)
+
+if(CACHED_STITCHER_USE_FAST_MATH)
+    set(CUDA_NVCC_FLAGS ${CUDA_NVCC_FLAGS} -use_fast_math)
+endif()
+
+if(CACHED_STITCHER_ENABLE_PROFILING)
+    set(CUDA_NVCC_FLAGS ${CUDA_NVCC_FLAGS} -lineinfo)
+endif()
+
+if(CACHED_STITCHER_BUILD_BENCHMARKS)
+    add_executable(benchmark_stitching
+        benchmarks/benchmark_stitching.cpp
+    )
+
+    target_link_libraries(benchmark_stitching
+        cached_stitcher
+        ${OpenCV_LIBS}
+    )
+endif()
