@@ -86,6 +86,11 @@ private:
         double seam_scale;
         double warped_image_scale;
         double compose_work_aspect;
+        // Warped image placement metadata
+        std::vector<Point> corners;      // top-left corner of each warped image in pano coords
+        std::vector<Size> warped_sizes;  // size of each warped image
+        Point pano_tl;                   // overall panorama top-left
+        Point pano_br;                   // overall panorama bottom-right
 
 #if defined(HAVE_OPENCV_GPU) && !defined(DYNAMIC_CUDA_SUPPORT)
         // GPU-specific cached data

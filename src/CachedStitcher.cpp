@@ -318,6 +318,11 @@ void CachedStitcher::precomputeWarpMaps() {
     Ptr<detail::RotationWarper> w = warper_->create(
         float(cache_->warped_image_scale * cache_->seam_scale));
 
+    cache_->corners.resize(cache_->indices.size());
+    cache_->warped_sizes.resize(cache_->indices.size());
+    Point overall_tl( std::numeric_limits<int>::max(), std::numeric_limits<int>::max() );
+    Point overall_br( std::numeric_limits<int>::min(), std::numeric_limits<int>::min() );
+
     for (size_t i = 0; i < cache_->indices.size(); ++i) {
         Mat_<float> K;
         cache_->cameras[i].K().convertTo(K, CV_32F);
@@ -329,20 +334,31 @@ void CachedStitcher::precomputeWarpMaps() {
         Size img_size = cache_->full_img_sizes[cache_->indices[i]];
 
         // Build and cache the warp maps
+        Rect roi;
         if (dynamic_cast<detail::SphericalWarperGpu*>(w.get())) {
-            dynamic_cast<detail::SphericalWarperGpu*>(w.get())->buildMaps(
+            roi = dynamic_cast<detail::SphericalWarperGpu*>(w.get())->buildMaps(
                 img_size, K, cache_->cameras[i].R,
                 cache_->gpu_xmaps[i], cache_->gpu_ymaps[i]);
         } else if (dynamic_cast<detail::CylindricalWarperGpu*>(w.get())) {
-            dynamic_cast<detail::CylindricalWarperGpu*>(w.get())->buildMaps(
+            roi = dynamic_cast<detail::CylindricalWarperGpu*>(w.get())->buildMaps(
                 img_size, K, cache_->cameras[i].R,
                 cache_->gpu_xmaps[i], cache_->gpu_ymaps[i]);
         } else if (dynamic_cast<detail::PlaneWarperGpu*>(w.get())) {
-            dynamic_cast<detail::PlaneWarperGpu*>(w.get())->buildMaps(
+            roi = dynamic_cast<detail::PlaneWarperGpu*>(w.get())->buildMaps(
                 img_size, K, cache_->cameras[i].R,
                 cache_->gpu_xmaps[i], cache_->gpu_ymaps[i]);
         }
+
+        cache_->corners[i] = roi.tl();
+        cache_->warped_sizes[i] = roi.size();
+        overall_tl.x = std::min(overall_tl.x, roi.tl().x);
+        overall_tl.y = std::min(overall_tl.y, roi.tl().y);
+        overall_br.x = std::max(overall_br.x, roi.br().x);
+        overall_br.y = std::max(overall_br.y, roi.br().y);
     }
+
+    cache_->pano_tl = overall_tl;
+    cache_->pano_br = overall_br;
 #endif
 }
 
@@ -361,15 +377,12 @@ void CachedStitcher::allocateGPUBuffers(const std::vector<Size>& sizes) {
 #if defined(HAVE_OPENCV_GPU) && !defined(DYNAMIC_CUDA_SUPPORT)
     if (!gpu_enabled_ || !cache_) return;
 
-    // Calculate maximum panorama size
-    int max_width = 0, max_height = 0;
-    for (const auto& size : sizes) {
-        max_width = std::max(max_width, size.width * 2);
-        max_height = std::max(max_height, size.height * 2);
-    }
+    // Use computed panorama extents from cached corners
+    int pano_width = std::max(1, cache_->pano_br.x - cache_->pano_tl.x + 1);
+    int pano_height = std::max(1, cache_->pano_br.y - cache_->pano_tl.y + 1);
 
     // Allocate panorama buffer as 8UC3 for IO; convert to 32F for blending when needed
-    cache_->gpu_panorama.create(max_height, max_width, CV_8UC3);
+    cache_->gpu_panorama.create(pano_height, pano_width, CV_8UC3);
 
     // Track GPU memory usage
     perf_stats_.gpu_memory_mb = (cache_->gpu_panorama.cols * cache_->gpu_panorama.rows *
@@ -381,11 +394,7 @@ void CachedStitcher::allocateGPUBuffers(const std::vector<Size>& sizes) {
                                       sizeof(float) * 4) / (1024.0 * 1024.0);
     }
 
-    // Initialize simple uniform weight maps matching panorama size (for basic blending)
-    for (size_t i = 0; i < cache_->indices.size(); ++i) {
-        cache_->gpu_weight_maps[i].create(cache_->gpu_panorama.rows, cache_->gpu_panorama.cols, CV_32F);
-        cache_->gpu_weight_maps[i].setTo(Scalar::all(1.0f));
-    }
+    // Weight maps are created per warped image during blending setup
 #endif
 }
 
@@ -455,41 +464,62 @@ void CachedStitcher::blendImagesGPU() {
 #if defined(HAVE_OPENCV_GPU) && !defined(DYNAMIC_CUDA_SUPPORT)
     if (!gpu_enabled_ || !cache_) return;
 
-    // Use GPU multi-band blending with cached weight maps
+    // Accumulate weighted images into panorama float buffer and normalize
     if (cache_->gpu_images_warped.size() > 0) {
-        // Initialize panorama with first image (as 8UC3)
-        cache_->gpu_images_warped[0].copyTo(cache_->gpu_panorama);
+        // Prepare accumulators
+        gpu::GpuMat pano_f, accum_w;
+        cache_->gpu_panorama.setTo(Scalar::all(0));
+        cache_->gpu_panorama.convertTo(pano_f, CV_32FC3);
+        accum_w.create(cache_->gpu_panorama.rows, cache_->gpu_panorama.cols, CV_32F);
+        accum_w.setTo(Scalar::all(0));
 
-        // Blend remaining images using cached weight maps
-        for (size_t i = 1; i < cache_->gpu_images_warped.size(); ++i) {
-            int stream_idx = i % num_cuda_streams_;
-
-            // Convert to float for blending
-            gpu::GpuMat pano_f, warped_f, out_f;
-            cache_->gpu_panorama.convertTo(pano_f, CV_32FC3);
+        for (size_t i = 0; i < cache_->gpu_images_warped.size(); ++i) {
+            // Convert warped image to float
+            gpu::GpuMat warped_f;
             cache_->gpu_images_warped[i].convertTo(warped_f, CV_32FC3);
-            if (warped_f.size() != pano_f.size()) {
-                gpu::resize(warped_f, warped_f, pano_f.size());
-            }
-            out_f.create(pano_f.size(), pano_f.type());
 
-            cv::gpu::device::stitching::launchMultibandBlend(
-                pano_f.ptr<float>(),
-                warped_f.ptr<float>(),
-                cache_->gpu_weight_maps[0].ptr<float>(),
-                cache_->gpu_weight_maps[i].ptr<float>(),
-                out_f.ptr<float>(),
-                pano_f.rows,
-                pano_f.cols,
-                3,
-                cache_->cuda_streams[stream_idx]
-            );
+            // Generate a soft mask/weight map from warped image content
+            gpu::GpuMat gray, mask8u, weight1f;
+            cv::gpu::cvtColor(cache_->gpu_images_warped[i], gray, CV_BGR2GRAY);
+            cv::gpu::threshold(gray, mask8u, 0, 255, THRESH_BINARY);
+            mask8u.convertTo(weight1f, CV_32F, 1.0/255.0);
+            cv::gpu::GaussianBlur(weight1f, weight1f, Size(15,15), 0);
 
-            // Convert back to 8-bit panorama
-            out_f.convertTo(cache_->gpu_panorama, CV_8UC3);
+            // Compute ROI in panorama
+            Point offset(cache_->corners[i].x - cache_->pano_tl.x,
+                         cache_->corners[i].y - cache_->pano_tl.y);
+            Rect roi(offset, cache_->gpu_images_warped[i].size());
+            Rect pano_rect(0,0, pano_f.cols, pano_f.rows);
+            roi = roi & pano_rect; // clip
+            if (roi.width <= 0 || roi.height <= 0) continue;
+
+            // Extract ROI views
+            gpu::GpuMat pano_tile = pano_f(roi);
+            gpu::GpuMat accum_tile = accum_w(roi);
+            gpu::GpuMat warped_tile = warped_f(Rect(0,0, roi.width, roi.height));
+            gpu::GpuMat weight_tile = weight1f(Rect(0,0, roi.width, roi.height));
+
+            // Expand weights to 3 channels for color multiply
+            std::vector<gpu::GpuMat> ch(3, weight_tile);
+            gpu::GpuMat weight3;
+            cv::gpu::merge(ch, weight3);
+
+            // pano += warped * w; accum_w += w
+            gpu::GpuMat contrib;
+            cv::gpu::multiply(warped_tile, weight3, contrib);
+            cv::gpu::add(pano_tile, contrib, pano_tile);
+            cv::gpu::add(accum_tile, weight_tile, accum_tile);
         }
 
-        // Synchronize all blending operations
+        // Normalize pano_f by accum_w
+        gpu::GpuMat denom = accum_w.clone();
+        cv::gpu::max(denom, Scalar::all(1e-6), denom);
+        std::vector<gpu::GpuMat> chd(3, denom);
+        gpu::GpuMat denom3;
+        cv::gpu::merge(chd, denom3);
+        cv::gpu::divide(pano_f, denom3, pano_f);
+        pano_f.convertTo(cache_->gpu_panorama, CV_8UC3);
+
         for (int i = 0; i < num_cuda_streams_; ++i) {
             cudaStreamSynchronize(cache_->cuda_streams[i]);
         }
