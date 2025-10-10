@@ -9,6 +9,7 @@
 #include <opencv2/highgui/highgui.hpp>
 #include <chrono>
 #include <iostream>
+#include <limits>
 
 #if defined(HAVE_OPENCV_GPU) && !defined(DYNAMIC_CUDA_SUPPORT)
 #include <opencv2/gpu/gpu.hpp>
@@ -116,7 +117,7 @@ CachedStitcher::Status CachedStitcher::cacheTransformations(
     InputArray images,
     const std::vector<std::vector<Rect> > &rois)
 {
-    auto start_time = std::chrono::high_resolution_clock::now();
+    auto frame_start = std::chrono::high_resolution_clock::now();
 
     // First, run standard transformation estimation
     Status status = estimateTransform(images, rois);
@@ -149,8 +150,8 @@ CachedStitcher::Status CachedStitcher::cacheTransformations(
         // Pre-compute warp maps
         precomputeWarpMaps();
 
-        // Pre-compute seam masks
-        precomputeSeamMasks();
+        // Pre-compute seam masks and weight maps using calibration images
+        precomputeSeamMasks(imgs);
 
         // Pre-compute exposure compensation gains
         if (exposure_comp_) {
@@ -216,6 +217,7 @@ CachedStitcher::Status CachedStitcher::composePanoramaGPU(
         // GPU-accelerated composition path with parallel stream optimization
         Mat &pano_ = pano.getMatRef();
 
+        auto t0 = std::chrono::high_resolution_clock::now();
         // Resize and upload images to GPU in parallel using streams
         cache_->gpu_images_src.resize(imgs_.size());
         cache_->gpu_images_warped.resize(imgs_.size());
@@ -246,14 +248,19 @@ CachedStitcher::Status CachedStitcher::composePanoramaGPU(
                 cache_->gpu_images_src[i].upload(img, stream);
             }
         }
+        auto t1 = std::chrono::high_resolution_clock::now();
 
         // Warp images using cached maps (already parallelized internally)
+        auto tw0 = std::chrono::high_resolution_clock::now();
         warpImagesGPU(imgs_);
+        auto tw1 = std::chrono::high_resolution_clock::now();
 
         // Apply exposure compensation in parallel using streams
+        auto te0 = std::chrono::high_resolution_clock::now();
         for (size_t i = 0; i < imgs_.size(); ++i) {
             applyExposureCompensationGPU(i);  // Uses streams internally
         }
+        auto te1 = std::chrono::high_resolution_clock::now();
 
         // Synchronize before blending
         for (int i = 0; i < num_cuda_streams_; ++i) {
@@ -261,10 +268,14 @@ CachedStitcher::Status CachedStitcher::composePanoramaGPU(
         }
 
         // Blend images (already parallelized internally)
+        auto tb0 = std::chrono::high_resolution_clock::now();
         blendImagesGPU();
+        auto tb1 = std::chrono::high_resolution_clock::now();
 
         // Download result (blocking operation)
+        auto td0 = std::chrono::high_resolution_clock::now();
         cache_->gpu_panorama.download(pano_);
+        auto td1 = std::chrono::high_resolution_clock::now();
 
     } else
 #endif
@@ -273,8 +284,8 @@ CachedStitcher::Status CachedStitcher::composePanoramaGPU(
         return Stitcher::composePanorama(images, pano);
     }
 
-    auto end_time = std::chrono::high_resolution_clock::now();
-    double compose_time = std::chrono::duration<double, std::milli>(end_time - start_time).count();
+    auto frame_end = std::chrono::high_resolution_clock::now();
+    double compose_time = std::chrono::duration<double, std::milli>(frame_end - frame_start).count();
 
     // Update performance stats
     perf_stats_.last_compose_time_ms = compose_time;
@@ -282,6 +293,16 @@ CachedStitcher::Status CachedStitcher::composePanoramaGPU(
     total_frames_processed_++;
     perf_stats_.frames_processed = total_frames_processed_;
     perf_stats_.avg_fps = 1000.0 / (total_compose_time_ms_ / total_frames_processed_);
+
+#if defined(HAVE_OPENCV_GPU) && !defined(DYNAMIC_CUDA_SUPPORT)
+    if (gpu_enabled_ && cache_) {
+        perf_stats_.upload_time_ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
+        perf_stats_.warp_time_ms = std::chrono::duration<double, std::milli>(tw1 - tw0).count();
+        perf_stats_.exposure_time_ms = std::chrono::duration<double, std::milli>(te1 - te0).count();
+        perf_stats_.blend_time_ms = std::chrono::duration<double, std::milli>(tb1 - tb0).count();
+        perf_stats_.download_time_ms = std::chrono::duration<double, std::milli>(td1 - td0).count();
+    }
+#endif
 
     return OK;
 }
@@ -362,13 +383,84 @@ void CachedStitcher::precomputeWarpMaps() {
 #endif
 }
 
-// Pre-compute seam masks
-void CachedStitcher::precomputeSeamMasks() {
+// Pre-compute seam masks and weight maps using CPU seam finder; upload to GPU
+void CachedStitcher::precomputeSeamMasks(const std::vector<Mat>& images) {
 #if defined(HAVE_OPENCV_GPU) && !defined(DYNAMIC_CUDA_SUPPORT)
     if (!gpu_enabled_ || !cache_) return;
 
-    // Seam masks will be computed during first composition
-    // and then cached for subsequent frames
+    std::vector<Mat> images_warped(cache_->indices.size());
+    std::vector<Mat> images_warped_f(cache_->indices.size());
+    std::vector<Mat> masks_warped(cache_->indices.size());
+
+    Ptr<detail::RotationWarper> w = warper_->create(
+        float(cache_->warped_image_scale * cache_->seam_scale));
+
+    for (size_t i = 0; i < cache_->indices.size(); ++i) {
+        Mat_<float> K;
+        cache_->cameras[i].K().convertTo(K, CV_32F);
+        K(0,0) *= (float)cache_->seam_scale;
+        K(0,2) *= (float)cache_->seam_scale;
+        K(1,1) *= (float)cache_->seam_scale;
+        K(1,2) *= (float)cache_->seam_scale;
+
+        int src_idx = cache_->indices[i];
+        if (src_idx < 0 || src_idx >= (int)images.size()) continue;
+        const Mat& img = images[src_idx];
+        if (img.empty()) continue;
+
+        w->warp(img, K, cache_->cameras[i].R, INTER_LINEAR, BORDER_REFLECT, images_warped[i]);
+        Mat mask(img.size(), CV_8U, Scalar::all(255));
+        w->warp(mask, K, cache_->cameras[i].R, INTER_NEAREST, BORDER_CONSTANT, masks_warped[i]);
+        images_warped[i].convertTo(images_warped_f[i], CV_32F);
+    }
+
+    if (seam_finder_) {
+        std::vector<Point> corners = cache_->corners;
+        seam_finder_->find(images_warped_f, corners, masks_warped);
+    }
+
+    for (size_t i = 0; i < masks_warped.size(); ++i) {
+        if (masks_warped[i].empty()) continue;
+        Mat mask_bin;
+        threshold(masks_warped[i], mask_bin, 1, 255, THRESH_BINARY);
+        Mat dist;
+        distanceTransform(mask_bin, dist, CV_DIST_L2, 3);
+        double maxv = 0.0; minMaxLoc(dist, NULL, &maxv);
+        if (maxv <= 0) maxv = 1.0;
+        Mat weight;
+        dist.convertTo(weight, CV_32F, 1.0 / maxv);
+        GaussianBlur(weight, weight, Size(15,15), 0);
+
+        cache_->gpu_seam_masks[i].upload(mask_bin);
+        cache_->gpu_weight_maps[i].upload(weight);
+    }
+
+    // Simple exposure compensation: match average brightness to image 0 in overlaps
+    if (!images_warped.empty() && !images_warped[0].empty()) {
+        Mat base_gray;
+        cvtColor(images_warped[0], base_gray, CV_BGR2GRAY);
+        Rect roi0(cache_->corners[0], cache_->warped_sizes[0]);
+        for (size_t i = 0; i < images_warped.size(); ++i) {
+            double gain = 1.0;
+            if (i != 0 && !images_warped[i].empty()) {
+                Mat gray;
+                cvtColor(images_warped[i], gray, CV_BGR2GRAY);
+                Rect roii(cache_->corners[i], cache_->warped_sizes[i]);
+                Rect overlap = roi0 & roii;
+                if (overlap.width > 0 && overlap.height > 0) {
+                    Rect roi0_local(overlap.tl() - roi0.tl(), overlap.size());
+                    Rect roii_local(overlap.tl() - roii.tl(), overlap.size());
+                    Scalar m0 = mean(base_gray(roi0_local));
+                    Scalar m1 = mean(gray(roii_local));
+                    if (m1[0] > 1e-3) gain = m0[0] / m1[0];
+                }
+            }
+            int tX = std::max(1, (cache_->warped_sizes[i].width + 31) / 32);
+            int tY = std::max(1, (cache_->warped_sizes[i].height + 31) / 32);
+            Mat gain_grid(tY, tX, CV_32F, Scalar::all((float)gain));
+            cache_->gpu_exposure_gains[i].upload(gain_grid);
+        }
+    }
 #endif
 }
 
@@ -478,12 +570,17 @@ void CachedStitcher::blendImagesGPU() {
             gpu::GpuMat warped_f;
             cache_->gpu_images_warped[i].convertTo(warped_f, CV_32FC3);
 
-            // Generate a soft mask/weight map from warped image content
-            gpu::GpuMat gray, mask8u, weight1f;
-            cv::gpu::cvtColor(cache_->gpu_images_warped[i], gray, CV_BGR2GRAY);
-            cv::gpu::threshold(gray, mask8u, 0, 255, THRESH_BINARY);
-            mask8u.convertTo(weight1f, CV_32F, 1.0/255.0);
-            cv::gpu::GaussianBlur(weight1f, weight1f, Size(15,15), 0);
+            // Prefer precomputed seam-based weight map; fallback to content mask
+            gpu::GpuMat weight1f;
+            if (!cache_->gpu_weight_maps[i].empty()) {
+                weight1f = cache_->gpu_weight_maps[i];
+            } else {
+                gpu::GpuMat gray, mask8u;
+                cv::gpu::cvtColor(cache_->gpu_images_warped[i], gray, CV_BGR2GRAY);
+                cv::gpu::threshold(gray, mask8u, 0, 255, THRESH_BINARY);
+                mask8u.convertTo(weight1f, CV_32F, 1.0/255.0);
+                cv::gpu::GaussianBlur(weight1f, weight1f, Size(15,15), 0);
+            }
 
             // Compute ROI in panorama
             Point offset(cache_->corners[i].x - cache_->pano_tl.x,

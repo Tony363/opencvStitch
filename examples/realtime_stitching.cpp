@@ -40,6 +40,7 @@ struct Config {
     int calibration_frames = 10;
     bool show_fps = true;
     bool debug_mode = false;
+    bool bench_mode = false;
 };
 
 Config parseArgs(int argc, char** argv) {
@@ -66,6 +67,8 @@ Config parseArgs(int argc, char** argv) {
             config.calibration_frames = atoi(argv[++i]);
         } else if (arg == "--debug") {
             config.debug_mode = true;
+        } else if (arg == "--bench") {
+            config.bench_mode = true;
         } else if (arg[0] != '-') {
             config.input_sources.push_back(arg);
         }
@@ -325,6 +328,9 @@ public:
 
                 // Show panorama
                 imshow("Real-time Panorama", panorama);
+                if (config.bench_mode) {
+                    displayBenchInfo();
+                }
 
                 // Write to output file
                 if (output_writer.isOpened()) {
@@ -397,6 +403,16 @@ private:
              << (1000.0 / stats.avg_fps) << " ms" << endl;
         cout << "GPU memory usage: " << stats.gpu_memory_mb << " MB" << endl;
         cout << "Calibration time: " << stats.transform_cache_time_ms << " ms" << endl;
+    }
+
+    void displayBenchInfo() {
+        auto s = stitcher.getPerformanceStats();
+        cout << fixed << setprecision(2)
+             << "Upload: " << s.upload_time_ms << " ms, "
+             << "Warp: " << s.warp_time_ms << " ms, "
+             << "Exposure: " << s.exposure_time_ms << " ms, "
+             << "Blend: " << s.blend_time_ms << " ms, "
+             << "Download: " << s.download_time_ms << " ms" << endl;
     }
 };
 

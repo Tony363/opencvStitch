@@ -67,6 +67,11 @@ public:
         double gpu_memory_mb;
         int frames_processed;
         double avg_fps;
+        double upload_time_ms;
+        double warp_time_ms;
+        double exposure_time_ms;
+        double blend_time_ms;
+        double download_time_ms;
     };
     PerformanceStats getPerformanceStats() const { return perf_stats_; }
     void resetPerformanceStats();
@@ -118,7 +123,7 @@ private:
     // Cache initialization methods
     void initializeGPUCache(const std::vector<Mat>& images);
     void precomputeWarpMaps();
-    void precomputeSeamMasks();
+    void precomputeSeamMasks(const std::vector<Mat>& images);
     void allocateGPUBuffers(const std::vector<Size>& sizes);
 
     // GPU composition methods
