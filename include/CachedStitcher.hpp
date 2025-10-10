@@ -89,6 +89,8 @@ private:
 
 #if defined(HAVE_OPENCV_GPU) && !defined(DYNAMIC_CUDA_SUPPORT)
         // GPU-specific cached data
+        // Pre-uploaded source frames
+        std::vector<gpu::GpuMat> gpu_images_src;
         std::vector<gpu::GpuMat> gpu_xmaps;
         std::vector<gpu::GpuMat> gpu_ymaps;
         std::vector<gpu::GpuMat> gpu_seam_masks;

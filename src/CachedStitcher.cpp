@@ -217,6 +217,7 @@ CachedStitcher::Status CachedStitcher::composePanoramaGPU(
         Mat &pano_ = pano.getMatRef();
 
         // Resize and upload images to GPU in parallel using streams
+        cache_->gpu_images_src.resize(imgs_.size());
         cache_->gpu_images_warped.resize(imgs_.size());
         for (size_t i = 0; i < imgs_.size(); ++i) {
             int stream_idx = i % num_cuda_streams_;
@@ -230,8 +231,20 @@ CachedStitcher::Status CachedStitcher::composePanoramaGPU(
                 img = imgs_[i];
             }
 
-            // Async upload to GPU using stream
-            cache_->gpu_images_warped[i].upload(img, stream);
+            // Ensure destination source buffer size/type
+            cache_->gpu_images_src[i].create(img.rows, img.cols, CV_8UC3);
+
+            // Async upload with optional pinned memory
+#if defined(HAVE_OPENCV_GPU) && !defined(DYNAMIC_CUDA_SUPPORT)
+            if (use_pinned_memory_) {
+                cudaHostRegister(img.data, img.step * img.rows, cudaHostRegisterPortable);
+                cache_->gpu_images_src[i].upload(img, stream);
+                cudaHostUnregister(img.data);
+            } else
+#endif
+            {
+                cache_->gpu_images_src[i].upload(img, stream);
+            }
         }
 
         // Warp images using cached maps (already parallelized internally)
@@ -355,8 +368,8 @@ void CachedStitcher::allocateGPUBuffers(const std::vector<Size>& sizes) {
         max_height = std::max(max_height, size.height * 2);
     }
 
-    // Allocate panorama buffer
-    cache_->gpu_panorama.create(max_height, max_width, CV_16SC3);
+    // Allocate panorama buffer as 8UC3 for IO; convert to 32F for blending when needed
+    cache_->gpu_panorama.create(max_height, max_width, CV_8UC3);
 
     // Track GPU memory usage
     perf_stats_.gpu_memory_mb = (cache_->gpu_panorama.cols * cache_->gpu_panorama.rows *
@@ -367,6 +380,12 @@ void CachedStitcher::allocateGPUBuffers(const std::vector<Size>& sizes) {
         perf_stats_.gpu_memory_mb += (sizes[i].width * sizes[i].height *
                                       sizeof(float) * 4) / (1024.0 * 1024.0);
     }
+
+    // Initialize simple uniform weight maps matching panorama size (for basic blending)
+    for (size_t i = 0; i < cache_->indices.size(); ++i) {
+        cache_->gpu_weight_maps[i].create(cache_->gpu_panorama.rows, cache_->gpu_panorama.cols, CV_32F);
+        cache_->gpu_weight_maps[i].setTo(Scalar::all(1.0f));
+    }
 #endif
 }
 
@@ -375,39 +394,30 @@ void CachedStitcher::warpImagesGPU(const std::vector<Mat>& images) {
 #if defined(HAVE_OPENCV_GPU) && !defined(DYNAMIC_CUDA_SUPPORT)
     if (!gpu_enabled_ || !cache_) return;
 
-    // Bind textures once for all warping operations
-    if (!cache_->textures_bound && cache_->gpu_xmaps.size() > 0) {
-        for (size_t i = 0; i < cache_->gpu_xmaps.size(); ++i) {
-            cv::gpu::device::stitching::bindWarpMapTextures(
-                cache_->gpu_xmaps[i].ptr<float>(),
-                cache_->gpu_ymaps[i].ptr<float>(),
-                cache_->gpu_xmaps[i].rows,
-                cache_->gpu_xmaps[i].cols,
-                cache_->gpu_xmaps[i].step
-            );
-        }
-        cache_->textures_bound = true;
-    }
-
     // Warp images in parallel using CUDA streams
     for (size_t i = 0; i < images.size(); ++i) {
         int stream_idx = i % num_cuda_streams_;
 
-        // Use optimized CUDA kernel with texture memory
+        // Ensure destination buffer matches warp map size
+        if (i < cache_->gpu_xmaps.size() && cache_->gpu_xmaps[i].data) {
+            cache_->gpu_images_warped[i].create(cache_->gpu_xmaps[i].rows, cache_->gpu_xmaps[i].cols, CV_8UC3);
+        }
+
+        // Use optimized CUDA kernel (no texture binding to avoid stale maps)
         cv::gpu::device::stitching::launchWarpImageCached(
             cache_->gpu_xmaps[i].ptr<float>(),
             cache_->gpu_ymaps[i].ptr<float>(),
-            cache_->gpu_images_warped[i].ptr<uchar>(),
-            cache_->gpu_images_warped[i].rows,
-            cache_->gpu_images_warped[i].cols,
-            cache_->gpu_images_warped[i].step,
+            cache_->gpu_images_src[i].ptr<uchar>(),
+            cache_->gpu_images_src[i].rows,
+            cache_->gpu_images_src[i].cols,
+            cache_->gpu_images_src[i].step,
             cache_->gpu_images_warped[i].ptr<uchar>(),
             cache_->gpu_images_warped[i].rows,
             cache_->gpu_images_warped[i].cols,
             cache_->gpu_images_warped[i].step,
             cache_->gpu_images_warped[i].channels(),
             cache_->cuda_streams[stream_idx],
-            cache_->textures_bound
+            false
         );
     }
 
@@ -447,24 +457,36 @@ void CachedStitcher::blendImagesGPU() {
 
     // Use GPU multi-band blending with cached weight maps
     if (cache_->gpu_images_warped.size() > 0) {
-        // Initialize panorama with first image
+        // Initialize panorama with first image (as 8UC3)
         cache_->gpu_images_warped[0].copyTo(cache_->gpu_panorama);
 
         // Blend remaining images using cached weight maps
         for (size_t i = 1; i < cache_->gpu_images_warped.size(); ++i) {
             int stream_idx = i % num_cuda_streams_;
 
+            // Convert to float for blending
+            gpu::GpuMat pano_f, warped_f, out_f;
+            cache_->gpu_panorama.convertTo(pano_f, CV_32FC3);
+            cache_->gpu_images_warped[i].convertTo(warped_f, CV_32FC3);
+            if (warped_f.size() != pano_f.size()) {
+                gpu::resize(warped_f, warped_f, pano_f.size());
+            }
+            out_f.create(pano_f.size(), pano_f.type());
+
             cv::gpu::device::stitching::launchMultibandBlend(
-                cache_->gpu_panorama.ptr<float>(),
-                cache_->gpu_images_warped[i].ptr<float>(),
+                pano_f.ptr<float>(),
+                warped_f.ptr<float>(),
                 cache_->gpu_weight_maps[0].ptr<float>(),
                 cache_->gpu_weight_maps[i].ptr<float>(),
-                cache_->gpu_panorama.ptr<float>(),
-                cache_->gpu_panorama.rows,
-                cache_->gpu_panorama.cols,
-                cache_->gpu_panorama.channels(),
+                out_f.ptr<float>(),
+                pano_f.rows,
+                pano_f.cols,
+                3,
                 cache_->cuda_streams[stream_idx]
             );
+
+            // Convert back to 8-bit panorama
+            out_f.convertTo(cache_->gpu_panorama, CV_8UC3);
         }
 
         // Synchronize all blending operations
@@ -485,18 +507,13 @@ void CachedStitcher::invalidateCache() {
 void CachedStitcher::releaseCache() {
 #if defined(HAVE_OPENCV_GPU) && !defined(DYNAMIC_CUDA_SUPPORT)
     if (cache_) {
-        // Unbind textures if they were bound
-        if (cache_->textures_bound) {
-            cv::gpu::device::stitching::unbindWarpMapTextures();
-            cache_->textures_bound = false;
-        }
-
         // Destroy CUDA streams
         for (auto& stream : cache_->cuda_streams) {
             cudaStreamDestroy(stream);
         }
 
         // Clear GPU matrices
+        cache_->gpu_images_src.clear();
         cache_->gpu_xmaps.clear();
         cache_->gpu_ymaps.clear();
         cache_->gpu_seam_masks.clear();
