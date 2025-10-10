@@ -196,11 +196,13 @@ __global__ void buildCylindricalMapsKernel(
 // Fast exposure compensation kernel
 __global__ void applyExposureCompensationKernel(
     uchar* image,
-    const float* gains,
+    const float* gains, // 3 floats per tile (RGB)
     int rows,
     int cols,
     int step,
-    int channels)
+    int channels,
+    int tiles_x,
+    int tiles_y)
 {
     const int x = blockIdx.x * blockDim.x + threadIdx.x;
     const int y = blockIdx.y * blockDim.y + threadIdx.y;
@@ -208,9 +210,12 @@ __global__ void applyExposureCompensationKernel(
     if (x >= cols || y >= rows)
         return;
 
-    const float gain = gains[y / 32 * (cols / 32) + x / 32];  // Block-based gains
+    const int tx = min(x / 32, tiles_x - 1);
+    const int ty = min(y / 32, tiles_y - 1);
+    const int tile_index = (ty * tiles_x + tx) * 3;
 
     for (int c = 0; c < channels; ++c) {
+        const float gain = gains[tile_index + (c < 3 ? c : 2)];
         int idx = y * step + x * channels + c;
         float val = image[idx] * gain;
         val = fminf(fmaxf(val, 0.0f), 255.0f);
@@ -343,6 +348,8 @@ void launchApplyExposureCompensation(
     int cols,
     int step,
     int channels,
+    int tiles_x,
+    int tiles_y,
     cudaStream_t stream)
 {
     dim3 block(BLOCK_SIZE_X, BLOCK_SIZE_Y);
@@ -350,7 +357,7 @@ void launchApplyExposureCompensation(
               (rows + block.y - 1) / block.y);
 
     applyExposureCompensationKernel<<<grid, block, 0, stream>>>(
-        image, gains, rows, cols, step, channels);
+        image, gains, rows, cols, step, channels, tiles_x, tiles_y);
 }
 
 void launchMultibandBlend(

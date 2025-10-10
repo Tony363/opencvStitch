@@ -65,11 +65,13 @@ void launchBuildCylindricalMaps(
 // Exposure compensation
 void launchApplyExposureCompensation(
     uchar* image,
-    const float* gains,
+    const float* gains, // 3-channel per-tile grid (CV_32FC3 layout)
     int rows,
     int cols,
     int step,
     int channels,
+    int tiles_x,
+    int tiles_y,
     cudaStream_t stream);
 
 // Multi-band blending

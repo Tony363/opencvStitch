@@ -181,14 +181,10 @@ CachedStitcher::Status CachedStitcher::cacheTransformations(
         // Pre-compute seam masks and weight maps using calibration images
         precomputeSeamMasks(imgs);
 
-        // Pre-compute exposure compensation gains
-        if (exposure_comp_) {
-            for (size_t i = 0; i < imgs.size(); ++i) {
-                // Compute exposure gains and store in GPU memory
-                std::vector<float> gains(256, 1.0f);  // Block-based gains
-                Mat gains_mat(16, 16, CV_32F, gains.data());
-                cache_->gpu_exposure_gains[i].upload(gains_mat);
-            }
+        // Initialize exposure gains grid (per-channel) with 1.0; refined later
+        for (size_t i = 0; i < imgs.size(); ++i) {
+            Mat ones(1, 1, CV_32FC3, Scalar(1.0f,1.0f,1.0f));
+            cache_->gpu_exposure_gains[i].upload(ones);
         }
 
         // Allocate GPU buffers
@@ -470,29 +466,28 @@ void CachedStitcher::precomputeSeamMasks(const std::vector<Mat>& images) {
 #endif
     }
 
-    // Simple exposure compensation: match average brightness to image 0 in overlaps
+    // Per-channel exposure compensation: match average RGB in overlaps to image 0
     if (!images_warped.empty() && !images_warped[0].empty()) {
-        Mat base_gray;
-        cvtColor(images_warped[0], base_gray, CV_BGR2GRAY);
         Rect roi0(cache_->corners[0], cache_->warped_sizes[0]);
         for (size_t i = 0; i < images_warped.size(); ++i) {
-            double gain = 1.0;
+            Vec3d gain(1.0,1.0,1.0);
             if (i != 0 && !images_warped[i].empty()) {
-                Mat gray;
-                cvtColor(images_warped[i], gray, CV_BGR2GRAY);
                 Rect roii(cache_->corners[i], cache_->warped_sizes[i]);
                 Rect overlap = roi0 & roii;
                 if (overlap.width > 0 && overlap.height > 0) {
                     Rect roi0_local(overlap.tl() - roi0.tl(), overlap.size());
                     Rect roii_local(overlap.tl() - roii.tl(), overlap.size());
-                    Scalar m0 = mean(base_gray(roi0_local));
-                    Scalar m1 = mean(gray(roii_local));
-                    if (m1[0] > 1e-3) gain = m0[0] / m1[0];
+                    Scalar m0 = mean(images_warped[0](roi0_local));
+                    Scalar m1 = mean(images_warped[i](roii_local));
+                    for (int c = 0; c < 3; ++c) {
+                        if (m1[c] > 1e-3) gain[c] = m0[c] / m1[c];
+                    }
                 }
             }
             int tX = std::max(1, cache_->warped_sizes[i].width / 32);
             int tY = std::max(1, cache_->warped_sizes[i].height / 32);
-            Mat gain_grid(tY, tX, CV_32F, Scalar::all((float)gain));
+            Mat gain_grid(tY, tX, CV_32FC3, Scalar(gain[0],gain[1],gain[2]));
+            GaussianBlur(gain_grid, gain_grid, Size(3,3), 0.5);
             cache_->gpu_exposure_gains[i].upload(gain_grid);
         }
     }
@@ -573,6 +568,8 @@ void CachedStitcher::applyExposureCompensationGPU(int img_idx) {
     if (exposure_comp_ && img_idx < cache_->gpu_exposure_gains.size()) {
         int stream_idx = img_idx % num_cuda_streams_;
 
+        int tiles_x = std::max(1, cache_->gpu_images_warped[img_idx].cols / 32);
+        int tiles_y = std::max(1, cache_->gpu_images_warped[img_idx].rows / 32);
         cv::gpu::device::stitching::launchApplyExposureCompensation(
             cache_->gpu_images_warped[img_idx].ptr<uchar>(),
             cache_->gpu_exposure_gains[img_idx].ptr<float>(),
@@ -580,6 +577,8 @@ void CachedStitcher::applyExposureCompensationGPU(int img_idx) {
             cache_->gpu_images_warped[img_idx].cols,
             cache_->gpu_images_warped[img_idx].step,
             cache_->gpu_images_warped[img_idx].channels(),
+            tiles_x,
+            tiles_y,
             cache_->cuda_streams[stream_idx]
         );
     }
@@ -698,7 +697,16 @@ size_t CachedStitcher::getCacheMemoryUsage() const {
 
 // Reset performance statistics
 void CachedStitcher::resetPerformanceStats() {
-    perf_stats_ = PerformanceStats();
+    perf_stats_.transform_cache_time_ms = 0.0;
+    perf_stats_.last_compose_time_ms = 0.0;
+    perf_stats_.gpu_memory_mb = 0.0;
+    perf_stats_.frames_processed = 0;
+    perf_stats_.avg_fps = 0.0;
+    perf_stats_.upload_time_ms = 0.0;
+    perf_stats_.warp_time_ms = 0.0;
+    perf_stats_.exposure_time_ms = 0.0;
+    perf_stats_.blend_time_ms = 0.0;
+    perf_stats_.download_time_ms = 0.0;
     total_frames_processed_ = 0;
     total_compose_time_ms_ = 0.0;
 }
