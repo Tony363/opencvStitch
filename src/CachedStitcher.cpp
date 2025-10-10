@@ -11,6 +11,34 @@
 #include <iostream>
 #include <limits>
 
+namespace {
+#if defined(HAVE_OPENCV_GPU) && !defined(DYNAMIC_CUDA_SUPPORT)
+// Approximate distance-based feather weights using iterative GPU erosion
+static void buildFeatherWeightFromMaskGPU(const cv::gpu::GpuMat& mask8u, cv::gpu::GpuMat& weight1f, int iters = 32) {
+    if (mask8u.empty()) return;
+    // Normalize mask to 0/1 float
+    cv::gpu::GpuMat current = mask8u.clone();
+    weight1f.create(mask8u.size(), CV_32F);
+    weight1f.setTo(cv::Scalar::all(0));
+
+    // 3x3 kernel for erosion
+    cv::Mat k = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(3,3));
+    cv::gpu::GpuMat current_f;
+    for (int i = 0; i < iters; ++i) {
+        // Accumulate current mask as weight contribution
+        current.convertTo(current_f, CV_32F, 1.0/255.0);
+        cv::gpu::add(weight1f, current_f, weight1f);
+        // Erode to move inward one pixel
+        cv::gpu::erode(current, current, k);
+    }
+    // Normalize to [0,1]
+    cv::gpu::divide(weight1f, cv::Scalar::all((double)iters), weight1f);
+    // Smooth a bit
+    cv::gpu::GaussianBlur(weight1f, weight1f, cv::Size(7,7), 0);
+}
+#endif
+} // anonymous namespace
+
 #if defined(HAVE_OPENCV_GPU) && !defined(DYNAMIC_CUDA_SUPPORT)
 #include <opencv2/gpu/gpu.hpp>
 #endif
@@ -423,6 +451,14 @@ void CachedStitcher::precomputeSeamMasks(const std::vector<Mat>& images) {
         if (masks_warped[i].empty()) continue;
         Mat mask_bin;
         threshold(masks_warped[i], mask_bin, 1, 255, THRESH_BINARY);
+
+        // Upload seam mask
+        cache_->gpu_seam_masks[i].upload(mask_bin);
+
+        // Prefer GPU-generated feather weights; fallback to CPU distance if needed
+#if defined(HAVE_OPENCV_GPU) && !defined(DYNAMIC_CUDA_SUPPORT)
+        buildFeatherWeightFromMaskGPU(cache_->gpu_seam_masks[i], cache_->gpu_weight_maps[i], 48);
+#else
         Mat dist;
         distanceTransform(mask_bin, dist, CV_DIST_L2, 3);
         double maxv = 0.0; minMaxLoc(dist, NULL, &maxv);
@@ -430,9 +466,8 @@ void CachedStitcher::precomputeSeamMasks(const std::vector<Mat>& images) {
         Mat weight;
         dist.convertTo(weight, CV_32F, 1.0 / maxv);
         GaussianBlur(weight, weight, Size(15,15), 0);
-
-        cache_->gpu_seam_masks[i].upload(mask_bin);
         cache_->gpu_weight_maps[i].upload(weight);
+#endif
     }
 
     // Simple exposure compensation: match average brightness to image 0 in overlaps
@@ -455,8 +490,8 @@ void CachedStitcher::precomputeSeamMasks(const std::vector<Mat>& images) {
                     if (m1[0] > 1e-3) gain = m0[0] / m1[0];
                 }
             }
-            int tX = std::max(1, (cache_->warped_sizes[i].width + 31) / 32);
-            int tY = std::max(1, (cache_->warped_sizes[i].height + 31) / 32);
+            int tX = std::max(1, cache_->warped_sizes[i].width / 32);
+            int tY = std::max(1, cache_->warped_sizes[i].height / 32);
             Mat gain_grid(tY, tX, CV_32F, Scalar::all((float)gain));
             cache_->gpu_exposure_gains[i].upload(gain_grid);
         }
