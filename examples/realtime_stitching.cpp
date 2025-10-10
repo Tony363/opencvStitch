@@ -30,7 +30,12 @@ using namespace std;
 
 // Command-line argument parser
 struct Config {
-    bool use_gpu = true;
+    bool use_gpu =
+#ifdef DEFAULT_USE_GPU
+        (DEFAULT_USE_GPU != 0);
+#else
+        true;
+#endif
     bool use_video = false;
     bool use_camera = false;
     vector<string> input_sources;

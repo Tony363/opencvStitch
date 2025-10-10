@@ -80,6 +80,15 @@ target_link_libraries(realtime_stitching
     ${OpenCV_LIBS}
 )
 
+# GPU and CPU specific binaries for easier testing
+add_executable(realtime_stitching_gpu examples/realtime_stitching.cpp)
+target_compile_definitions(realtime_stitching_gpu PRIVATE DEFAULT_USE_GPU=1)
+target_link_libraries(realtime_stitching_gpu cached_stitcher ${OpenCV_LIBS})
+
+add_executable(realtime_stitching_cpu examples/realtime_stitching.cpp)
+target_compile_definitions(realtime_stitching_cpu PRIVATE DEFAULT_USE_GPU=0)
+target_link_libraries(realtime_stitching_cpu cached_stitcher ${OpenCV_LIBS})
+
 # Build tests (optional)
 if(BUILD_TESTS)
     add_executable(test_cached_stitcher
@@ -132,9 +141,13 @@ if(CACHED_STITCHER_BUILD_BENCHMARKS)
     add_executable(benchmark_stitching
         benchmarks/benchmark_stitching.cpp
     )
+    target_link_libraries(benchmark_stitching cached_stitcher ${OpenCV_LIBS})
 
-    target_link_libraries(benchmark_stitching
-        cached_stitcher
-        ${OpenCV_LIBS}
-    )
+    add_executable(benchmark_stitching_gpu benchmarks/benchmark_stitching.cpp)
+    target_compile_definitions(benchmark_stitching_gpu PRIVATE DEFAULT_USE_GPU=1)
+    target_link_libraries(benchmark_stitching_gpu cached_stitcher ${OpenCV_LIBS})
+
+    add_executable(benchmark_stitching_cpu benchmarks/benchmark_stitching.cpp)
+    target_compile_definitions(benchmark_stitching_cpu PRIVATE DEFAULT_USE_GPU=0)
+    target_link_libraries(benchmark_stitching_cpu cached_stitcher ${OpenCV_LIBS})
 endif()

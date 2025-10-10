@@ -16,7 +16,12 @@ using namespace cv;
 using namespace std;
 
 struct Args {
-    bool use_gpu = true;
+    bool use_gpu =
+#ifdef DEFAULT_USE_GPU
+        (DEFAULT_USE_GPU != 0);
+#else
+        true;
+#endif
     int iters = 200;
     vector<string> images;
 };
@@ -102,4 +107,3 @@ int main(int argc, char** argv) {
 
     return 0;
 }
-
