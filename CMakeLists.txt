@@ -198,6 +198,17 @@ OCV_OPTION(BUILD_TINY_GPU_MODULE    "Build tiny gpu module with limited image fo
 # 3rd party libs
 OCV_OPTION(BUILD_ZLIB               "Build zlib from source"             WIN32 OR APPLE )
 OCV_OPTION(BUILD_TIFF               "Build libtiff from source"          WIN32 OR ANDROID OR APPLE )
+
+# --------------------------------------------------------------
+# CachedStitcher integration (GPU-accelerated real-time stitching)
+# --------------------------------------------------------------
+# Build the CachedStitcher library, demo, and benchmarks as part of the
+# top-level build so the README's `cmake ..` flow works out of the box.
+# Toggle with CACHED_STITCHER_ENABLE if desired.
+option(CACHED_STITCHER_ENABLE "Build CachedStitcher binaries and benchmarks" ON)
+if(CACHED_STITCHER_ENABLE)
+  include(${CMAKE_SOURCE_DIR}/CMakeLists_CachedStitcher.txt)
+endif()
 OCV_OPTION(BUILD_JASPER             "Build libjasper from source"        WIN32 OR ANDROID OR APPLE )
 OCV_OPTION(BUILD_JPEG               "Build libjpeg from source"          WIN32 OR ANDROID OR APPLE )
 OCV_OPTION(BUILD_PNG                "Build libpng from source"           WIN32 OR ANDROID OR APPLE )

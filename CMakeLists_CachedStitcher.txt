@@ -1,11 +1,17 @@
 # CMake configuration for CachedStitcher GPU-accelerated real-time stitching
 # Add this to your main CMakeLists.txt or create a separate module
 
-cmake_minimum_required(VERSION 2.8.12.2)
+# When included from the OpenCV superbuild, avoid re-declaring top-level policies
+if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+    cmake_minimum_required(VERSION 2.8.12.2)
+endif()
 
 # Find required packages
 find_package(CUDA REQUIRED)
-find_package(OpenCV REQUIRED)
+# If building in-tree with OpenCV (this repo), skip external find_package(OpenCV)
+if(NOT OpenCV_SOURCE_DIR)
+    find_package(OpenCV REQUIRED)
+endif()
 
 # Set CUDA compilation flags
 set(CUDA_NVCC_FLAGS ${CUDA_NVCC_FLAGS}
