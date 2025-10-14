@@ -22,8 +22,10 @@
 #include <opencv2/imgproc/imgproc.hpp>
 #include <iostream>
 #include <vector>
+#include <stdexcept>
 #include <chrono>
 #include <iomanip>
+#include <cstdlib>
 
 using namespace cv;
 using namespace std;
@@ -46,9 +48,10 @@ struct Config {
     bool show_fps = true;
     bool debug_mode = false;
     bool bench_mode = false;
+    bool display_output = true;
 };
 
-Config parseArgs(int argc, char** argv) {
+static Config parseArgs(int argc, char** argv) {
     Config config;
 
     for (int i = 1; i < argc; ++i) {
@@ -74,10 +77,21 @@ Config parseArgs(int argc, char** argv) {
             config.debug_mode = true;
         } else if (arg == "--bench") {
             config.bench_mode = true;
+        } else if (arg == "--no-display" || arg == "--headless") {
+            config.display_output = false;
         } else if (arg[0] != '-') {
             config.input_sources.push_back(arg);
         }
     }
+
+#if !defined(_WIN32)
+    if (config.display_output) {
+        const char* display_env = std::getenv("DISPLAY");
+        if (!display_env || display_env[0] == '\0') {
+            config.display_output = false;
+        }
+    }
+#endif
 
     return config;
 }
@@ -179,7 +193,7 @@ public:
 // Main stitching pipeline
 class RealtimeStitchingPipeline {
 private:
-    CachedStitcher stitcher;
+    Ptr<CachedStitcher> stitcher;
     Config config;
     VideoSource video_source;
     VideoWriter output_writer;
@@ -189,10 +203,13 @@ public:
     RealtimeStitchingPipeline(const Config& cfg) : config(cfg) {
         // Create optimized stitcher
         stitcher = CachedStitcher::createOptimized(config.use_gpu);
+        if (!stitcher) {
+            throw runtime_error("Failed to create CachedStitcher instance");
+        }
 
         // Configure for real-time performance
-        stitcher.setNumCudaStreams(4);
-        stitcher.setUsePinnedMemory(true);
+        stitcher->setNumCudaStreams(4);
+        stitcher->setUsePinnedMemory(true);
     }
 
     bool initialize() {
@@ -204,7 +221,7 @@ public:
         }
 
         // Setup output video writer if needed
-        if (!config.output_file.empty()) {
+        if (!config.output_file.empty() && (config.use_camera || config.use_video)) {
             Size frame_size = getOutputSize();
             int fourcc = CV_FOURCC('M', 'J', 'P', 'G');
             output_writer.open(config.output_file, fourcc, config.target_fps,
@@ -214,6 +231,8 @@ public:
                 cerr << "Failed to open output video file: " << config.output_file << endl;
                 return false;
             }
+        } else if (!config.output_file.empty()) {
+            cout << "Output will be saved as image: " << config.output_file << endl;
         }
 
         return true;
@@ -252,7 +271,7 @@ public:
                 }
 
                 // Skip some frames to allow auto-exposure to settle
-                if (i < 5) {
+                if (i < 5 && config.display_output) {
                     waitKey(100);
                 }
             }
@@ -261,7 +280,7 @@ public:
         // Perform calibration
         auto start = chrono::high_resolution_clock::now();
 
-        CachedStitcher::Status status = stitcher.cacheTransformations(calibration_frames);
+        CachedStitcher::Status status = stitcher->cacheTransformations(calibration_frames);
 
         auto end = chrono::high_resolution_clock::now();
         double calibration_time = chrono::duration<double>(end - start).count();
@@ -274,7 +293,7 @@ public:
         cout << "Done! (" << calibration_time << " seconds)" << endl;
 
         // Display performance stats
-        auto stats = stitcher.getPerformanceStats();
+        auto stats = stitcher->getPerformanceStats();
         cout << "GPU Memory Usage: " << stats.gpu_memory_mb << " MB" << endl;
 
         return true;
@@ -293,17 +312,30 @@ public:
                 images.push_back(imread(source));
             }
 
-            auto status = stitcher.composePanoramaGPU(images, panorama);
+            auto status = stitcher->composePanoramaGPU(images, panorama);
             if (status == CachedStitcher::OK) {
-                imshow("Panorama", panorama);
-                cout << "Press any key to exit..." << endl;
-                waitKey(0);
+                if (config.display_output) {
+                    imshow("Panorama", panorama);
+                    cout << "Press any key to exit..." << endl;
+                    waitKey(0);
+                } else {
+                    std::string out_path = config.output_file.empty() ? "panorama.jpg" : config.output_file;
+                    if (!imwrite(out_path, panorama)) {
+                        cerr << "Failed to write panorama to " << out_path << endl;
+                    } else {
+                        cout << "Panorama saved to " << out_path << endl;
+                    }
+                }
             }
             return;
         }
 
         // Main processing loop for video/camera
-        cout << "Processing... Press 'q' to quit" << endl;
+        if (config.display_output) {
+            cout << "Processing... Press 'q' to quit" << endl;
+        } else {
+            cout << "Processing... (headless mode, press Ctrl+C to stop)" << endl;
+        }
 
         while (running) {
             vector<Mat> frames;
@@ -315,7 +347,7 @@ public:
             }
 
             // Perform stitching
-            auto status = stitcher.composePanoramaGPU(frames, panorama);
+            auto status = stitcher->composePanoramaGPU(frames, panorama);
 
             if (status == CachedStitcher::OK) {
                 // Update FPS counter
@@ -331,25 +363,29 @@ public:
                     displayDebugInfo(panorama);
                 }
 
-                // Show panorama
-                imshow("Real-time Panorama", panorama);
-                if (config.bench_mode) {
+                if (config.display_output) {
+                    imshow("Real-time Panorama", panorama);
+                    if (config.bench_mode) {
+                        displayBenchInfo();
+                    }
+
+                    int key = waitKey(1);
+                    if (key == 'q' || key == 27) {  // 'q' or ESC
+                        running = false;
+                    } else if (key == 'd') {
+                        config.debug_mode = !config.debug_mode;
+                    } else if (key == 'f') {
+                        config.show_fps = !config.show_fps;
+                    }
+                } else if (config.bench_mode) {
                     displayBenchInfo();
                 }
 
-                // Write to output file
+                // Write to output file or stream
                 if (output_writer.isOpened()) {
                     output_writer.write(panorama);
-                }
-
-                // Check for quit
-                int key = waitKey(1);
-                if (key == 'q' || key == 27) {  // 'q' or ESC
-                    running = false;
-                } else if (key == 'd') {
-                    config.debug_mode = !config.debug_mode;
-                } else if (key == 'f') {
-                    config.show_fps = !config.show_fps;
+                } else if (!config.output_file.empty() && !config.display_output) {
+                    imwrite(config.output_file, panorama);
                 }
             } else {
                 cerr << "Stitching failed for frame" << endl;
@@ -365,7 +401,9 @@ public:
         if (output_writer.isOpened()) {
             output_writer.release();
         }
-        destroyAllWindows();
+        if (config.display_output) {
+            destroyAllWindows();
+        }
     }
 
 private:
@@ -384,7 +422,7 @@ private:
     }
 
     void displayDebugInfo(Mat& image) {
-        auto stats = stitcher.getPerformanceStats();
+        auto stats = stitcher->getPerformanceStats();
 
         stringstream ss;
         ss << "Compose: " << fixed << setprecision(1)
@@ -399,7 +437,7 @@ private:
     }
 
     void displayFinalStats() {
-        auto stats = stitcher.getPerformanceStats();
+        auto stats = stitcher->getPerformanceStats();
 
         cout << "\n=== Performance Statistics ===" << endl;
         cout << "Total frames processed: " << stats.frames_processed << endl;
@@ -411,7 +449,7 @@ private:
     }
 
     void displayBenchInfo() {
-        auto s = stitcher.getPerformanceStats();
+        auto s = stitcher->getPerformanceStats();
         cout << fixed << setprecision(2)
              << "Upload: " << s.upload_time_ms << " ms, "
              << "Warp: " << s.warp_time_ms << " ms, "
@@ -435,6 +473,7 @@ int main(int argc, char** argv) {
         cout << "  --resolution    Output resolution (720p/1080p/4k)" << endl;
         cout << "  --calibrate N   Calibration frames (default: 10)" << endl;
         cout << "  --debug         Show debug information" << endl;
+        cout << "  --no-display    Disable GUI windows (headless mode)" << endl;
         return 1;
     }
 
@@ -452,6 +491,7 @@ int main(int argc, char** argv) {
     cout << "Input sources: " << config.input_sources.size() << endl;
     cout << "Target FPS: " << config.target_fps << endl;
     cout << "Resolution: " << config.resolution << endl;
+    cout << "Display output: " << (config.display_output ? "Enabled" : "Disabled") << endl;
 
     // Create and run pipeline
     RealtimeStitchingPipeline pipeline(config);

@@ -74,6 +74,29 @@ if(CACHED_STITCHER_ENABLE_CUDA)
     )
 endif()
 
+# Determine OpenCV linkage set (fallback when OpenCV_LIBS is empty during
+# in-tree builds).
+set(_cached_stitcher_opencv_libs ${OpenCV_LIBS})
+if(NOT _cached_stitcher_opencv_libs)
+    set(_cached_stitcher_opencv_libs
+        opencv_core
+        opencv_imgproc
+        opencv_highgui
+        opencv_features2d
+        opencv_flann
+        opencv_calib3d
+        opencv_photo
+        opencv_video
+        opencv_stitching
+        opencv_objdetect
+        opencv_ml
+        opencv_legacy
+        opencv_nonfree
+        opencv_videostab
+        opencv_superres
+    )
+endif()
+
 # Create CachedStitcher library
 add_library(cached_stitcher SHARED
     ${CACHED_STITCHER_SOURCES}
@@ -82,7 +105,7 @@ add_library(cached_stitcher SHARED
 
 # Link libraries
 target_link_libraries(cached_stitcher
-    ${OpenCV_LIBS}
+    ${_cached_stitcher_opencv_libs}
 )
 
 if(CACHED_STITCHER_ENABLE_CUDA)
@@ -113,17 +136,23 @@ add_executable(realtime_stitching
 
 target_link_libraries(realtime_stitching
     cached_stitcher
-    ${OpenCV_LIBS}
+    ${_cached_stitcher_opencv_libs}
 )
 
 # GPU and CPU specific binaries for easier testing
 add_executable(realtime_stitching_gpu examples/realtime_stitching.cpp)
 target_compile_definitions(realtime_stitching_gpu PRIVATE DEFAULT_USE_GPU=1)
-target_link_libraries(realtime_stitching_gpu cached_stitcher ${OpenCV_LIBS})
+target_link_libraries(realtime_stitching_gpu
+    cached_stitcher
+    ${_cached_stitcher_opencv_libs}
+)
 
 add_executable(realtime_stitching_cpu examples/realtime_stitching.cpp)
 target_compile_definitions(realtime_stitching_cpu PRIVATE DEFAULT_USE_GPU=0)
-target_link_libraries(realtime_stitching_cpu cached_stitcher ${OpenCV_LIBS})
+target_link_libraries(realtime_stitching_cpu
+    cached_stitcher
+    ${_cached_stitcher_opencv_libs}
+)
 
 # Build tests (optional)
 if(BUILD_TESTS AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test/test_cached_stitcher.cpp")
@@ -133,7 +162,7 @@ if(BUILD_TESTS AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test/test_cached_stitcher
 
     target_link_libraries(test_cached_stitcher
         cached_stitcher
-        ${OpenCV_LIBS}
+        ${_cached_stitcher_opencv_libs}
     )
 elseif(BUILD_TESTS)
     message(WARNING "CachedStitcher tests requested but test/test_cached_stitcher.cpp is missing; skipping target.")

@@ -21,6 +21,10 @@
 #include <opencv2/stitching/detail/blenders.hpp>
 #include <opencv2/stitching/detail/exposure_compensate.hpp>
 
+#ifndef CACHED_STITCHER_USE_CUDA
+#define CACHED_STITCHER_USE_CUDA 0
+#endif
+
 #if CACHED_STITCHER_USE_CUDA && !defined(DYNAMIC_CUDA_SUPPORT)
 #include <opencv2/gpu/gpu.hpp>
 #include <cuda_runtime.h>
