@@ -60,6 +60,8 @@
 
 namespace cv {
 
+class CachedStitcher;
+
 class CV_EXPORTS Stitcher
 {
 public:
@@ -139,11 +141,12 @@ public:
     std::vector<detail::CameraParams> cameras() const { return cameras_; }
     double workScale() const { return work_scale_; }
 
-private:
+protected:
+    friend class CachedStitcher;
     Stitcher() {}
 
-    Status matchImages();
-    void estimateCameraParams();
+    virtual Status matchImages();
+    virtual void estimateCameraParams();
 
     double registr_resol_;
     double seam_est_resol_;

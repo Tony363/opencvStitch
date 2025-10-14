@@ -1,0 +1,126 @@
+Building CXX object CMakeFiles/cached_stitcher.dir/src/CachedStitcher.cpp.o
+cc1plus: warning: command-line option ‘-Wmissing-prototypes’ is valid for C/ObjC but not for C++
+cc1plus: warning: command-line option ‘-Wstrict-prototypes’ is valid for C/ObjC but not for C++
+/home/tony/Desktop/opencvStitch/src/CachedStitcher.cpp: In constructor ‘cv::CachedStitcher::CachedStitcher(bool)’:
+/home/tony/Desktop/opencvStitch/src/CachedStitcher.cpp:58:33: error: ‘cv::Stitcher::Stitcher()’ is private within this context
+   58 |     , total_compose_time_ms_(0.0)
+      |                                 ^
+In file included from /home/tony/Desktop/opencvStitch/include/CachedStitcher.hpp:17,
+                 from /home/tony/Desktop/opencvStitch/src/CachedStitcher.cpp:6:
+/home/tony/Desktop/opencvStitch/modules/stitching/include/opencv2/stitching/stitcher.hpp:143:5: note: declared private here
+  143 |     Stitcher() {}
+      |     ^~~~~~~~
+/home/tony/Desktop/opencvStitch/src/CachedStitcher.cpp: In static member function ‘static cv::CachedStitcher cv::CachedStitcher::createOptimized(bool)’:
+/home/tony/Desktop/opencvStitch/src/CachedStitcher.cpp:138:12: error: use of deleted function ‘cv::CachedStitcher::CachedStitcher(const cv::CachedStitcher&)’
+  138 |     return stitcher;
+      |            ^~~~~~~~
+/home/tony/Desktop/opencvStitch/include/CachedStitcher.hpp:34:7: note: ‘cv::CachedStitcher::CachedStitcher(const cv::CachedStitcher&)’ is implicitly deleted because the default definition would be ill-formed:
+   34 | class CachedStitcher : public Stitcher
+      |       ^~~~~~~~~~~~~~
+/home/tony/Desktop/opencvStitch/include/CachedStitcher.hpp:34:7: error: use of deleted function ‘std::unique_ptr<_Tp, _Dp>::unique_ptr(const std::unique_ptr<_Tp, _Dp>&) [with _Tp = cv::CachedStitcher::TransformCache; _Dp = std::default_delete<cv::CachedStitcher::TransformCache>]’
+In file included from /usr/include/c++/13/memory:78,
+                 from /home/tony/Desktop/opencvStitch/include/CachedStitcher.hpp:30:
+/usr/include/c++/13/bits/unique_ptr.h:522:7: note: declared here
+  522 |       unique_ptr(const unique_ptr&) = delete;
+      |       ^~~~~~~~~~
+/home/tony/Desktop/opencvStitch/src/CachedStitcher.cpp: In member function ‘cv::Stitcher::Status cv::CachedStitcher::cacheTransformations(cv::InputArray, const std::vector<std::vector<cv::Rect_<int> > >&)’:
+/home/tony/Desktop/opencvStitch/src/CachedStitcher.cpp:164:23: error: ‘std::vector<cv::detail::CameraParams> cv::Stitcher::cameras_’ is private within this context
+  164 |     cache_->cameras = cameras_;
+      |                       ^~~~~~~~
+/home/tony/Desktop/opencvStitch/modules/stitching/include/opencv2/stitching/stitcher.hpp:170:39: note: declared private here
+  170 |     std::vector<detail::CameraParams> cameras_;
+      |                                       ^~~~~~~~
+/home/tony/Desktop/opencvStitch/src/CachedStitcher.cpp:165:23: error: ‘std::vector<int> cv::Stitcher::indices_’ is private within this context
+  165 |     cache_->indices = indices_;
+      |                       ^~~~~~~~
+/home/tony/Desktop/opencvStitch/modules/stitching/include/opencv2/stitching/stitcher.hpp:169:22: note: declared private here
+  169 |     std::vector<int> indices_;
+      |                      ^~~~~~~~
+/home/tony/Desktop/opencvStitch/src/CachedStitcher.cpp:166:30: error: ‘std::vector<cv::Size_<int> > cv::Stitcher::full_img_sizes_’ is private within this context
+  166 |     cache_->full_img_sizes = full_img_sizes_;
+      |                              ^~~~~~~~~~~~~~~
+/home/tony/Desktop/opencvStitch/modules/stitching/include/opencv2/stitching/stitcher.hpp:165:27: note: declared private here
+  165 |     std::vector<cv::Size> full_img_sizes_;
+      |                           ^~~~~~~~~~~~~~~
+/home/tony/Desktop/opencvStitch/src/CachedStitcher.cpp:167:26: error: ‘double cv::Stitcher::work_scale_’ is private within this context
+  167 |     cache_->work_scale = work_scale_;
+      |                          ^~~~~~~~~~~
+/home/tony/Desktop/opencvStitch/modules/stitching/include/opencv2/stitching/stitcher.hpp:171:12: note: declared private here
+  171 |     double work_scale_;
+      |            ^~~~~~~~~~~
+/home/tony/Desktop/opencvStitch/src/CachedStitcher.cpp:168:26: error: ‘double cv::Stitcher::seam_scale_’ is private within this context
+  168 |     cache_->seam_scale = seam_scale_;
+      |                          ^~~~~~~~~~~
+/home/tony/Desktop/opencvStitch/modules/stitching/include/opencv2/stitching/stitcher.hpp:172:12: note: declared private here
+  172 |     double seam_scale_;
+      |            ^~~~~~~~~~~
+/home/tony/Desktop/opencvStitch/src/CachedStitcher.cpp:169:34: error: ‘double cv::Stitcher::warped_image_scale_’ is private within this context
+  169 |     cache_->warped_image_scale = warped_image_scale_;
+      |                                  ^~~~~~~~~~~~~~~~~~~
+/home/tony/Desktop/opencvStitch/modules/stitching/include/opencv2/stitching/stitcher.hpp:174:12: note: declared private here
+  174 |     double warped_image_scale_;
+      |            ^~~~~~~~~~~~~~~~~~~
+/home/tony/Desktop/opencvStitch/src/CachedStitcher.cpp:205:62: error: ‘start_time’ was not declared in this scope; did you mean ‘strptime’?
+  205 |         std::chrono::duration<double, std::milli>(end_time - start_time).count();
+      |                                                              ^~~~~~~~~~
+      |                                                              strptime
+/home/tony/Desktop/opencvStitch/src/CachedStitcher.cpp: In member function ‘cv::Stitcher::Status cv::CachedStitcher::composePanoramaGPU(cv::InputArray, cv::OutputArray)’:
+/home/tony/Desktop/opencvStitch/src/CachedStitcher.cpp:234:28: error: ‘std::vector<cv::Mat> cv::Stitcher::imgs_’ is private within this context
+  234 |         if (imgs.size() != imgs_.size()) {
+      |                            ^~~~~
+/home/tony/Desktop/opencvStitch/modules/stitching/include/opencv2/stitching/stitcher.hpp:163:26: note: declared private here
+  163 |     std::vector<cv::Mat> imgs_;
+      |                          ^~~~~
+/home/tony/Desktop/opencvStitch/src/CachedStitcher.cpp:238:9: error: ‘std::vector<cv::Mat> cv::Stitcher::imgs_’ is private within this context
+  238 |         imgs_ = imgs;
+      |         ^~~~~
+/home/tony/Desktop/opencvStitch/modules/stitching/include/opencv2/stitching/stitcher.hpp:163:26: note: declared private here
+  163 |     std::vector<cv::Mat> imgs_;
+      |                          ^~~~~
+/home/tony/Desktop/opencvStitch/src/CachedStitcher.cpp:314:81: error: ‘frame_start’ was not declared in this scope
+  314 |     double compose_time = std::chrono::duration<double, std::milli>(frame_end - frame_start).count();
+      |                                                                                 ^~~~~~~~~~~
+/home/tony/Desktop/opencvStitch/src/CachedStitcher.cpp: In member function ‘void cv::CachedStitcher::initializeGPUCache(const std::vector<cv::Mat>&)’:
+/home/tony/Desktop/opencvStitch/src/CachedStitcher.cpp:337:65: warning: unused parameter ‘images’ [-Wunused-parameter]
+  337 | void CachedStitcher::initializeGPUCache(const std::vector<Mat>& images) {
+      |                                         ~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~
+/home/tony/Desktop/opencvStitch/src/CachedStitcher.cpp: In member function ‘void cv::CachedStitcher::precomputeSeamMasks(const std::vector<cv::Mat>&)’:
+/home/tony/Desktop/opencvStitch/src/CachedStitcher.cpp:413:66: warning: unused parameter ‘images’ [-Wunused-parameter]
+  413 | void CachedStitcher::precomputeSeamMasks(const std::vector<Mat>& images) {
+      |                                          ~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~
+/home/tony/Desktop/opencvStitch/src/CachedStitcher.cpp: In member function ‘void cv::CachedStitcher::allocateGPUBuffers(const std::vector<cv::Size_<int> >&)’:
+/home/tony/Desktop/opencvStitch/src/CachedStitcher.cpp:500:66: warning: unused parameter ‘sizes’ [-Wunused-parameter]
+  500 | void CachedStitcher::allocateGPUBuffers(const std::vector<Size>& sizes) {
+      |                                         ~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~
+/home/tony/Desktop/opencvStitch/src/CachedStitcher.cpp: In member function ‘void cv::CachedStitcher::warpImagesGPU(const std::vector<cv::Mat>&)’:
+/home/tony/Desktop/opencvStitch/src/CachedStitcher.cpp:526:60: warning: unused parameter ‘images’ [-Wunused-parameter]
+  526 | void CachedStitcher::warpImagesGPU(const std::vector<Mat>& images) {
+      |                                    ~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~
+/home/tony/Desktop/opencvStitch/src/CachedStitcher.cpp: In member function ‘void cv::CachedStitcher::applyExposureCompensationGPU(int)’:
+/home/tony/Desktop/opencvStitch/src/CachedStitcher.cpp:565:55: warning: unused parameter ‘img_idx’ [-Wunused-parameter]
+  565 | void CachedStitcher::applyExposureCompensationGPU(int img_idx) {
+      |                                                   ~~~~^~~~~~~
+/home/tony/Desktop/opencvStitch/src/CachedStitcher.cpp: In member function ‘virtual cv::Stitcher::Status cv::CachedStitcher::matchImages()’:
+/home/tony/Desktop/opencvStitch/src/CachedStitcher.cpp:725:33: error: ‘cv::Stitcher::Status cv::Stitcher::matchImages()’ is private within this context
+  725 |     return Stitcher::matchImages();
+      |            ~~~~~~~~~~~~~~~~~~~~~^~
+/home/tony/Desktop/opencvStitch/modules/stitching/include/opencv2/stitching/stitcher.hpp:145:12: note: declared private here
+  145 |     Status matchImages();
+      |            ^~~~~~~~~~~
+/home/tony/Desktop/opencvStitch/src/CachedStitcher.cpp: In member function ‘virtual void cv::CachedStitcher::estimateCameraParams()’:
+/home/tony/Desktop/opencvStitch/src/CachedStitcher.cpp:733:9: error: ‘std::vector<cv::detail::CameraParams> cv::Stitcher::cameras_’ is private within this context
+  733 |         cameras_ = cache_->cameras;
+      |         ^~~~~~~~
+/home/tony/Desktop/opencvStitch/modules/stitching/include/opencv2/stitching/stitcher.hpp:170:39: note: declared private here
+  170 |     std::vector<detail::CameraParams> cameras_;
+      |                                       ^~~~~~~~
+/home/tony/Desktop/opencvStitch/src/CachedStitcher.cpp:738:35: error: ‘void cv::Stitcher::estimateCameraParams()’ is private within this context
+  738 |     Stitcher::estimateCameraParams();
+      |     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^~
+/home/tony/Desktop/opencvStitch/modules/stitching/include/opencv2/stitching/stitcher.hpp:146:10: note: declared private here
+  146 |     void estimateCameraParams();
+      |          ^~~~~~~~~~~~~~~~~~~~
+gmake[3]: *** [CMakeFiles/cached_stitcher.dir/build.make:76: CMakeFiles/cached_stitcher.dir/src/CachedStitcher.cpp.o] Error 1
+gmake[2]: *** [CMakeFiles/Makefile2:1307: CMakeFiles/cached_stitcher.dir/all] Error 2
+gmake[1]: *** [CMakeFiles/Makefile2:1314: CMakeFiles/cached_stitcher.dir/rule] Error 2
+gmake: *** [Makefile:199: cached_stitcher] Error 2

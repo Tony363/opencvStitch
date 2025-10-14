@@ -21,7 +21,7 @@
 #include <opencv2/stitching/detail/blenders.hpp>
 #include <opencv2/stitching/detail/exposure_compensate.hpp>
 
-#if defined(HAVE_OPENCV_GPU) && !defined(DYNAMIC_CUDA_SUPPORT)
+#if CACHED_STITCHER_USE_CUDA && !defined(DYNAMIC_CUDA_SUPPORT)
 #include <opencv2/gpu/gpu.hpp>
 #include <cuda_runtime.h>
 #endif
@@ -36,10 +36,14 @@ class CachedStitcher : public Stitcher
 public:
     // Constructor with GPU preference
     CachedStitcher(bool try_use_gpu = true);
+    CachedStitcher(const CachedStitcher&) = delete;
+    CachedStitcher& operator=(const CachedStitcher&) = delete;
+    CachedStitcher(CachedStitcher&&) = default;
+    CachedStitcher& operator=(CachedStitcher&&) = default;
     ~CachedStitcher();
 
     // Static factory method for optimized defaults
-    static CachedStitcher createOptimized(bool try_use_gpu = true);
+    static Ptr<CachedStitcher> createOptimized(bool try_use_gpu = true);
 
     // Cache transformation matrices after one-time calibration
     Status cacheTransformations(InputArray images);
@@ -97,7 +101,7 @@ private:
         Point pano_tl;                   // overall panorama top-left
         Point pano_br;                   // overall panorama bottom-right
 
-#if defined(HAVE_OPENCV_GPU) && !defined(DYNAMIC_CUDA_SUPPORT)
+#if CACHED_STITCHER_USE_CUDA && !defined(DYNAMIC_CUDA_SUPPORT)
         // GPU-specific cached data
         // Pre-uploaded source frames
         std::vector<gpu::GpuMat> gpu_images_src;
@@ -148,13 +152,14 @@ private:
     double total_compose_time_ms_;
 
     // GPU warper instances
-#if defined(HAVE_OPENCV_GPU) && !defined(DYNAMIC_CUDA_SUPPORT)
+#if CACHED_STITCHER_USE_CUDA && !defined(DYNAMIC_CUDA_SUPPORT)
     Ptr<detail::PlaneWarperGpu> plane_warper_gpu_;
     Ptr<detail::CylindricalWarperGpu> cylindrical_warper_gpu_;
     Ptr<detail::SphericalWarperGpu> spherical_warper_gpu_;
 #endif
 };
 
+#if CACHED_STITCHER_USE_CUDA && !defined(DYNAMIC_CUDA_SUPPORT)
 // Utility class for managing CUDA resources
 class CudaResourceManager {
 public:
@@ -172,6 +177,7 @@ private:
     std::vector<cudaStream_t> streams_;
     void cleanup();
 };
+#endif // CACHED_STITCHER_USE_CUDA && !DYNAMIC_CUDA_SUPPORT
 
 } // namespace cv
 

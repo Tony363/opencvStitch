@@ -4,7 +4,9 @@
  */
 
 #include "CachedStitcher.hpp"
+#if CACHED_STITCHER_USE_CUDA && !defined(DYNAMIC_CUDA_SUPPORT)
 #include "gpu_transform_cache.hpp"
+#endif
 #include <opencv2/imgproc/imgproc.hpp>
 #include <opencv2/highgui/highgui.hpp>
 #include <chrono>
@@ -12,7 +14,7 @@
 #include <limits>
 
 namespace {
-#if defined(HAVE_OPENCV_GPU) && !defined(DYNAMIC_CUDA_SUPPORT)
+#if CACHED_STITCHER_USE_CUDA && !defined(DYNAMIC_CUDA_SUPPORT)
 // Approximate distance-based feather weights using iterative GPU erosion
 static void buildFeatherWeightFromMaskGPU(const cv::gpu::GpuMat& mask8u, cv::gpu::GpuMat& weight1f, int iters = 32) {
     if (mask8u.empty()) return;
@@ -39,7 +41,7 @@ static void buildFeatherWeightFromMaskGPU(const cv::gpu::GpuMat& mask8u, cv::gpu
 #endif
 } // anonymous namespace
 
-#if defined(HAVE_OPENCV_GPU) && !defined(DYNAMIC_CUDA_SUPPORT)
+#if CACHED_STITCHER_USE_CUDA && !defined(DYNAMIC_CUDA_SUPPORT)
 #include <opencv2/gpu/gpu.hpp>
 #endif
 
@@ -55,7 +57,7 @@ CachedStitcher::CachedStitcher(bool try_use_gpu)
     , total_frames_processed_(0)
     , total_compose_time_ms_(0.0)
 {
-#if defined(HAVE_OPENCV_GPU) && !defined(DYNAMIC_CUDA_SUPPORT)
+#if CACHED_STITCHER_USE_CUDA && !defined(DYNAMIC_CUDA_SUPPORT)
     if (gpu_enabled_ && gpu::getCudaEnabledDeviceCount() > 0) {
         cache_.reset(new TransformCache());
 
@@ -87,51 +89,51 @@ CachedStitcher::~CachedStitcher() {
 }
 
 // Factory method for optimized configuration
-CachedStitcher CachedStitcher::createOptimized(bool try_use_gpu) {
-    CachedStitcher stitcher(try_use_gpu);
+Ptr<CachedStitcher> CachedStitcher::createOptimized(bool try_use_gpu) {
+    Ptr<CachedStitcher> stitcher(new CachedStitcher(try_use_gpu));
 
     // Optimized settings for real-time performance
-    stitcher.setRegistrationResol(0.4);  // Lower for speed
-    stitcher.setSeamEstimationResol(0.08);  // Lower for speed
-    stitcher.setCompositingResol(ORIG_RESOL);
-    stitcher.setPanoConfidenceThresh(0.9);  // Slightly lower threshold
-    stitcher.setWaveCorrection(true);
-    stitcher.setWaveCorrectKind(detail::WAVE_CORRECT_HORIZ);
+    stitcher->setRegistrationResol(0.4);  // Lower for speed
+    stitcher->setSeamEstimationResol(0.08);  // Lower for speed
+    stitcher->setCompositingResol(ORIG_RESOL);
+    stitcher->setPanoConfidenceThresh(0.9);  // Slightly lower threshold
+    stitcher->setWaveCorrection(true);
+    stitcher->setWaveCorrectKind(detail::WAVE_CORRECT_HORIZ);
 
-#if defined(HAVE_OPENCV_GPU) && !defined(DYNAMIC_CUDA_SUPPORT)
+#if CACHED_STITCHER_USE_CUDA && !defined(DYNAMIC_CUDA_SUPPORT)
     if (try_use_gpu && gpu::getCudaEnabledDeviceCount() > 0) {
         // Use GPU-accelerated components
-        stitcher.setFeaturesMatcher(new detail::BestOf2NearestMatcher(true));
-        stitcher.setBundleAdjuster(new detail::BundleAdjusterRay());
+        stitcher->setFeaturesMatcher(new detail::BestOf2NearestMatcher(true));
+        stitcher->setBundleAdjuster(new detail::BundleAdjusterRay());
 
 #ifdef HAVE_OPENCV_NONFREE
-        stitcher.setFeaturesFinder(new detail::SurfFeaturesFinderGpu());
+        stitcher->setFeaturesFinder(new detail::SurfFeaturesFinderGpu());
 #else
-        stitcher.setFeaturesFinder(new detail::OrbFeaturesFinder());
+        stitcher->setFeaturesFinder(new detail::OrbFeaturesFinder());
 #endif
 
-        stitcher.setWarper(new SphericalWarperGpu());
-        stitcher.setSeamFinder(new detail::GraphCutSeamFinderGpu());
-        stitcher.setBlender(new detail::MultiBandBlender(true));
+        stitcher->setWarper(new SphericalWarperGpu());
+        stitcher->setSeamFinder(new detail::GraphCutSeamFinderGpu());
+        stitcher->setBlender(new detail::MultiBandBlender(true));
     } else
 #endif
     {
         // CPU fallback
-        stitcher.setFeaturesMatcher(new detail::BestOf2NearestMatcher(false));
-        stitcher.setBundleAdjuster(new detail::BundleAdjusterRay());
+        stitcher->setFeaturesMatcher(new detail::BestOf2NearestMatcher(false));
+        stitcher->setBundleAdjuster(new detail::BundleAdjusterRay());
 
 #ifdef HAVE_OPENCV_NONFREE
-        stitcher.setFeaturesFinder(new detail::SurfFeaturesFinder());
+        stitcher->setFeaturesFinder(new detail::SurfFeaturesFinder());
 #else
-        stitcher.setFeaturesFinder(new detail::OrbFeaturesFinder());
+        stitcher->setFeaturesFinder(new detail::OrbFeaturesFinder());
 #endif
 
-        stitcher.setWarper(new SphericalWarper());
-        stitcher.setSeamFinder(new detail::GraphCutSeamFinder(detail::GraphCutSeamFinderBase::COST_COLOR));
-        stitcher.setBlender(new detail::MultiBandBlender(false));
+        stitcher->setWarper(new SphericalWarper());
+        stitcher->setSeamFinder(new detail::GraphCutSeamFinder(detail::GraphCutSeamFinderBase::COST_COLOR));
+        stitcher->setBlender(new detail::MultiBandBlender(false));
     }
 
-    stitcher.setExposureCompensator(new detail::BlocksGainCompensator());
+    stitcher->setExposureCompensator(new detail::BlocksGainCompensator());
 
     return stitcher;
 }
@@ -145,7 +147,7 @@ CachedStitcher::Status CachedStitcher::cacheTransformations(
     InputArray images,
     const std::vector<std::vector<Rect> > &rois)
 {
-    auto frame_start = std::chrono::high_resolution_clock::now();
+    auto start_time = std::chrono::high_resolution_clock::now();
 
     // First, run standard transformation estimation
     Status status = estimateTransform(images, rois);
@@ -170,7 +172,7 @@ CachedStitcher::Status CachedStitcher::cacheTransformations(
     std::vector<Mat> imgs;
     images.getMatVector(imgs);
 
-#if defined(HAVE_OPENCV_GPU) && !defined(DYNAMIC_CUDA_SUPPORT)
+#if CACHED_STITCHER_USE_CUDA && !defined(DYNAMIC_CUDA_SUPPORT)
     if (gpu_enabled_) {
         // Initialize GPU-specific cache
         initializeGPUCache(imgs);
@@ -236,7 +238,7 @@ CachedStitcher::Status CachedStitcher::composePanoramaGPU(
         imgs_ = imgs;
     }
 
-#if defined(HAVE_OPENCV_GPU) && !defined(DYNAMIC_CUDA_SUPPORT)
+#if CACHED_STITCHER_USE_CUDA && !defined(DYNAMIC_CUDA_SUPPORT)
     if (gpu_enabled_ && cache_) {
         // GPU-accelerated composition path with parallel stream optimization
         Mat &pano_ = pano.getMatRef();
@@ -261,7 +263,7 @@ CachedStitcher::Status CachedStitcher::composePanoramaGPU(
             cache_->gpu_images_src[i].create(img.rows, img.cols, CV_8UC3);
 
             // Async upload with optional pinned memory
-#if defined(HAVE_OPENCV_GPU) && !defined(DYNAMIC_CUDA_SUPPORT)
+#if CACHED_STITCHER_USE_CUDA && !defined(DYNAMIC_CUDA_SUPPORT)
             if (use_pinned_memory_) {
                 cudaHostRegister(img.data, img.step * img.rows, cudaHostRegisterPortable);
                 cache_->gpu_images_src[i].upload(img, stream);
@@ -309,7 +311,7 @@ CachedStitcher::Status CachedStitcher::composePanoramaGPU(
     }
 
     auto frame_end = std::chrono::high_resolution_clock::now();
-    double compose_time = std::chrono::duration<double, std::milli>(frame_end - frame_start).count();
+    double compose_time = std::chrono::duration<double, std::milli>(frame_end - start_time).count();
 
     // Update performance stats
     perf_stats_.last_compose_time_ms = compose_time;
@@ -318,7 +320,7 @@ CachedStitcher::Status CachedStitcher::composePanoramaGPU(
     perf_stats_.frames_processed = total_frames_processed_;
     perf_stats_.avg_fps = 1000.0 / (total_compose_time_ms_ / total_frames_processed_);
 
-#if defined(HAVE_OPENCV_GPU) && !defined(DYNAMIC_CUDA_SUPPORT)
+#if CACHED_STITCHER_USE_CUDA && !defined(DYNAMIC_CUDA_SUPPORT)
     if (gpu_enabled_ && cache_) {
         perf_stats_.upload_time_ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
         perf_stats_.warp_time_ms = std::chrono::duration<double, std::milli>(tw1 - tw0).count();
@@ -333,7 +335,7 @@ CachedStitcher::Status CachedStitcher::composePanoramaGPU(
 
 // Initialize GPU cache
 void CachedStitcher::initializeGPUCache(const std::vector<Mat>& images) {
-#if defined(HAVE_OPENCV_GPU) && !defined(DYNAMIC_CUDA_SUPPORT)
+#if CACHED_STITCHER_USE_CUDA && !defined(DYNAMIC_CUDA_SUPPORT)
     if (!gpu_enabled_ || !cache_) return;
 
     // Initialize CUDA streams
@@ -352,12 +354,14 @@ void CachedStitcher::initializeGPUCache(const std::vector<Mat>& images) {
     cache_->gpu_images_warped.resize(num_images);
     cache_->gpu_masks_warped.resize(num_images);
     cache_->textures_bound = false;
+#else
+    (void)images;
 #endif
 }
 
 // Pre-compute warp maps
 void CachedStitcher::precomputeWarpMaps() {
-#if defined(HAVE_OPENCV_GPU) && !defined(DYNAMIC_CUDA_SUPPORT)
+#if CACHED_STITCHER_USE_CUDA && !defined(DYNAMIC_CUDA_SUPPORT)
     if (!gpu_enabled_ || !cache_) return;
 
     Ptr<detail::RotationWarper> w = warper_->create(
@@ -409,7 +413,7 @@ void CachedStitcher::precomputeWarpMaps() {
 
 // Pre-compute seam masks and weight maps using CPU seam finder; upload to GPU
 void CachedStitcher::precomputeSeamMasks(const std::vector<Mat>& images) {
-#if defined(HAVE_OPENCV_GPU) && !defined(DYNAMIC_CUDA_SUPPORT)
+#if CACHED_STITCHER_USE_CUDA && !defined(DYNAMIC_CUDA_SUPPORT)
     if (!gpu_enabled_ || !cache_) return;
 
     std::vector<Mat> images_warped(cache_->indices.size());
@@ -452,7 +456,7 @@ void CachedStitcher::precomputeSeamMasks(const std::vector<Mat>& images) {
         cache_->gpu_seam_masks[i].upload(mask_bin);
 
         // Prefer GPU-generated feather weights; fallback to CPU distance if needed
-#if defined(HAVE_OPENCV_GPU) && !defined(DYNAMIC_CUDA_SUPPORT)
+#if CACHED_STITCHER_USE_CUDA && !defined(DYNAMIC_CUDA_SUPPORT)
         buildFeatherWeightFromMaskGPU(cache_->gpu_seam_masks[i], cache_->gpu_weight_maps[i], 48);
 #else
         Mat dist;
@@ -491,12 +495,14 @@ void CachedStitcher::precomputeSeamMasks(const std::vector<Mat>& images) {
             cache_->gpu_exposure_gains[i].upload(gain_grid);
         }
     }
+#else
+    (void)images;
 #endif
 }
 
 // Allocate GPU buffers
 void CachedStitcher::allocateGPUBuffers(const std::vector<Size>& sizes) {
-#if defined(HAVE_OPENCV_GPU) && !defined(DYNAMIC_CUDA_SUPPORT)
+#if CACHED_STITCHER_USE_CUDA && !defined(DYNAMIC_CUDA_SUPPORT)
     if (!gpu_enabled_ || !cache_) return;
 
     // Use computed panorama extents from cached corners
@@ -517,12 +523,14 @@ void CachedStitcher::allocateGPUBuffers(const std::vector<Size>& sizes) {
     }
 
     // Weight maps are created per warped image during blending setup
+#else
+    (void)sizes;
 #endif
 }
 
 // Warp images using cached GPU maps with texture memory optimization
 void CachedStitcher::warpImagesGPU(const std::vector<Mat>& images) {
-#if defined(HAVE_OPENCV_GPU) && !defined(DYNAMIC_CUDA_SUPPORT)
+#if CACHED_STITCHER_USE_CUDA && !defined(DYNAMIC_CUDA_SUPPORT)
     if (!gpu_enabled_ || !cache_) return;
 
     // Warp images in parallel using CUDA streams
@@ -556,12 +564,14 @@ void CachedStitcher::warpImagesGPU(const std::vector<Mat>& images) {
     for (int i = 0; i < num_cuda_streams_; ++i) {
         cudaStreamSynchronize(cache_->cuda_streams[i]);
     }
+#else
+    (void)images;
 #endif
 }
 
 // Apply exposure compensation on GPU
 void CachedStitcher::applyExposureCompensationGPU(int img_idx) {
-#if defined(HAVE_OPENCV_GPU) && !defined(DYNAMIC_CUDA_SUPPORT)
+#if CACHED_STITCHER_USE_CUDA && !defined(DYNAMIC_CUDA_SUPPORT)
     if (!gpu_enabled_ || !cache_) return;
 
     // Apply exposure compensation if configured and cached
@@ -582,12 +592,14 @@ void CachedStitcher::applyExposureCompensationGPU(int img_idx) {
             cache_->cuda_streams[stream_idx]
         );
     }
+#else
+    (void)img_idx;
 #endif
 }
 
 // Blend images on GPU
 void CachedStitcher::blendImagesGPU() {
-#if defined(HAVE_OPENCV_GPU) && !defined(DYNAMIC_CUDA_SUPPORT)
+#if CACHED_STITCHER_USE_CUDA && !defined(DYNAMIC_CUDA_SUPPORT)
     if (!gpu_enabled_ || !cache_) return;
 
     // Accumulate weighted images into panorama float buffer and normalize
@@ -666,7 +678,7 @@ void CachedStitcher::invalidateCache() {
 
 // Release cached resources
 void CachedStitcher::releaseCache() {
-#if defined(HAVE_OPENCV_GPU) && !defined(DYNAMIC_CUDA_SUPPORT)
+#if CACHED_STITCHER_USE_CUDA && !defined(DYNAMIC_CUDA_SUPPORT)
     if (cache_) {
         // Destroy CUDA streams
         for (auto& stream : cache_->cuda_streams) {
@@ -736,14 +748,13 @@ void CachedStitcher::estimateCameraParams() {
     Stitcher::estimateCameraParams();
 }
 
+#if CACHED_STITCHER_USE_CUDA && !defined(DYNAMIC_CUDA_SUPPORT)
 // CudaResourceManager implementation
 CudaResourceManager::CudaResourceManager(int num_streams) {
-#if defined(HAVE_OPENCV_GPU) && !defined(DYNAMIC_CUDA_SUPPORT)
     streams_.resize(num_streams);
     for (auto& stream : streams_) {
         cudaStreamCreate(&stream);
     }
-#endif
 }
 
 CudaResourceManager::~CudaResourceManager() {
@@ -751,57 +762,44 @@ CudaResourceManager::~CudaResourceManager() {
 }
 
 void CudaResourceManager::cleanup() {
-#if defined(HAVE_OPENCV_GPU) && !defined(DYNAMIC_CUDA_SUPPORT)
     for (auto& stream : streams_) {
         cudaStreamDestroy(stream);
     }
-#endif
 }
 
 cudaStream_t CudaResourceManager::getStream(int idx) const {
-#if defined(HAVE_OPENCV_GPU) && !defined(DYNAMIC_CUDA_SUPPORT)
     if (idx >= 0 && idx < streams_.size()) {
         return streams_[idx];
     }
-#endif
     return 0;
 }
 
 void CudaResourceManager::synchronizeAll() {
-#if defined(HAVE_OPENCV_GPU) && !defined(DYNAMIC_CUDA_SUPPORT)
     for (const auto& stream : streams_) {
         cudaStreamSynchronize(stream);
     }
-#endif
 }
 
 void CudaResourceManager::synchronizeStream(int idx) {
-#if defined(HAVE_OPENCV_GPU) && !defined(DYNAMIC_CUDA_SUPPORT)
     if (idx >= 0 && idx < streams_.size()) {
         cudaStreamSynchronize(streams_[idx]);
     }
-#endif
 }
 
 size_t CudaResourceManager::getAvailableGPUMemory() {
-#if defined(HAVE_OPENCV_GPU) && !defined(DYNAMIC_CUDA_SUPPORT)
     size_t free_mem, total_mem;
     cudaMemGetInfo(&free_mem, &total_mem);
     return free_mem;
-#else
-    return 0;
-#endif
 }
 
 bool CudaResourceManager::checkGPUCapability(int major, int minor) {
-#if defined(HAVE_OPENCV_GPU) && !defined(DYNAMIC_CUDA_SUPPORT)
     int device_count = gpu::getCudaEnabledDeviceCount();
     if (device_count > 0) {
         gpu::DeviceInfo info(0);
         return info.majorVersion() >= major && info.minorVersion() >= minor;
     }
-#endif
     return false;
 }
+#endif // CACHED_STITCHER_USE_CUDA && !DYNAMIC_CUDA_SUPPORT
 
 } // namespace cv

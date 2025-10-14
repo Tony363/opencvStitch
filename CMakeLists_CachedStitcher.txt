@@ -6,40 +6,57 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     cmake_minimum_required(VERSION 2.8.12.2)
 endif()
 
-# Find required packages
-find_package(CUDA REQUIRED)
+# Determine whether CUDA is available / enabled
+set(CACHED_STITCHER_ENABLE_CUDA OFF)
+if(WITH_CUDA)
+    find_package(CUDA QUIET)
+    if(CUDA_FOUND)
+        set(CACHED_STITCHER_ENABLE_CUDA ON)
+    else()
+        message(WARNING "WITH_CUDA=ON but CUDA toolkit not found. Building CachedStitcher without GPU acceleration.")
+    endif()
+endif()
+
 # If building in-tree with OpenCV (this repo), skip external find_package(OpenCV)
 if(NOT OpenCV_SOURCE_DIR)
     find_package(OpenCV REQUIRED)
 endif()
 
-# Set CUDA compilation flags
-set(CUDA_NVCC_FLAGS ${CUDA_NVCC_FLAGS}
-    -gencode arch=compute_30,code=sm_30
-    -gencode arch=compute_35,code=sm_35
-    -gencode arch=compute_50,code=sm_50
-    -gencode arch=compute_52,code=sm_52
-    -gencode arch=compute_60,code=sm_60
-    -gencode arch=compute_61,code=sm_61
-    -gencode arch=compute_70,code=sm_70
-    -gencode arch=compute_75,code=sm_75
-)
+if(CACHED_STITCHER_ENABLE_CUDA)
+    # Set CUDA compilation flags
+    set(CUDA_NVCC_FLAGS ${CUDA_NVCC_FLAGS}
+        -gencode arch=compute_30,code=sm_30
+        -gencode arch=compute_35,code=sm_35
+        -gencode arch=compute_50,code=sm_50
+        -gencode arch=compute_52,code=sm_52
+        -gencode arch=compute_60,code=sm_60
+        -gencode arch=compute_61,code=sm_61
+        -gencode arch=compute_70,code=sm_70
+        -gencode arch=compute_75,code=sm_75
+    )
 
-# Enable fast math for better performance
-set(CUDA_NVCC_FLAGS ${CUDA_NVCC_FLAGS} -use_fast_math)
+    # Enable fast math for better performance
+    set(CUDA_NVCC_FLAGS ${CUDA_NVCC_FLAGS} -use_fast_math)
+endif()
 
 # Set C++ standard
 set(CMAKE_CXX_STANDARD 11)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Include directories
+file(GLOB CACHED_STITCHER_MODULE_INCLUDE_DIRS
+    "${CMAKE_CURRENT_SOURCE_DIR}/modules/*/include"
+)
 include_directories(
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${CMAKE_CURRENT_SOURCE_DIR}/modules/stitching/include
     ${CMAKE_CURRENT_SOURCE_DIR}/modules/gpu/include
+    ${CACHED_STITCHER_MODULE_INCLUDE_DIRS}
     ${OpenCV_INCLUDE_DIRS}
-    ${CUDA_INCLUDE_DIRS}
 )
+if(CACHED_STITCHER_ENABLE_CUDA)
+    include_directories(${CUDA_INCLUDE_DIRS})
+endif()
 
 # Source files
 set(CACHED_STITCHER_SOURCES
@@ -50,10 +67,12 @@ set(CACHED_STITCHER_HEADERS
     include/CachedStitcher.hpp
 )
 
-# CUDA source files
-cuda_add_library(gpu_transform_cache
-    src/gpu_transform_cache.cu
-)
+if(CACHED_STITCHER_ENABLE_CUDA)
+    # CUDA source files
+    cuda_add_library(gpu_transform_cache
+        src/gpu_transform_cache.cu
+    )
+endif()
 
 # Create CachedStitcher library
 add_library(cached_stitcher SHARED
@@ -64,17 +83,28 @@ add_library(cached_stitcher SHARED
 # Link libraries
 target_link_libraries(cached_stitcher
     ${OpenCV_LIBS}
-    gpu_transform_cache
-    ${CUDA_LIBRARIES}
-    ${CUDA_CUBLAS_LIBRARIES}
-    ${CUDA_cufft_LIBRARY}
 )
 
-# Add compile definitions
-target_compile_definitions(cached_stitcher PRIVATE
-    HAVE_OPENCV_GPU
-    HAVE_CUDA
-)
+if(CACHED_STITCHER_ENABLE_CUDA)
+    target_link_libraries(cached_stitcher
+        gpu_transform_cache
+        ${CUDA_LIBRARIES}
+        ${CUDA_CUBLAS_LIBRARIES}
+        ${CUDA_cufft_LIBRARY}
+    )
+
+    # Add compile definitions
+    target_compile_definitions(cached_stitcher PRIVATE
+        HAVE_OPENCV_GPU=1
+        HAVE_CUDA=1
+        CACHED_STITCHER_USE_CUDA=1
+    )
+else()
+    target_compile_definitions(cached_stitcher PRIVATE
+        CACHED_STITCHER_CPU_ONLY=1
+        CACHED_STITCHER_USE_CUDA=0
+    )
+endif()
 
 # Build examples
 add_executable(realtime_stitching
@@ -96,7 +126,7 @@ target_compile_definitions(realtime_stitching_cpu PRIVATE DEFAULT_USE_GPU=0)
 target_link_libraries(realtime_stitching_cpu cached_stitcher ${OpenCV_LIBS})
 
 # Build tests (optional)
-if(BUILD_TESTS)
+if(BUILD_TESTS AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test/test_cached_stitcher.cpp")
     add_executable(test_cached_stitcher
         test/test_cached_stitcher.cpp
     )
@@ -105,6 +135,8 @@ if(BUILD_TESTS)
         cached_stitcher
         ${OpenCV_LIBS}
     )
+elseif(BUILD_TESTS)
+    message(WARNING "CachedStitcher tests requested but test/test_cached_stitcher.cpp is missing; skipping target.")
 endif()
 
 # Installation rules
