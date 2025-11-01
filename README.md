@@ -7,18 +7,18 @@ This repository extends OpenCV 2.4 with a GPU‑optimized stitching pipeline cen
 ```mermaid
 flowchart LR
   subgraph "Calibration (once)"
-    A[Features + Matching] --> B[Bundle Adjust]
-    B --> C[Build Warp Maps (GPU)]
-    B --> D[Warp Preview (CPU, seam scale)]
-    D --> E[Seam Find (GraphCut)]
-    E --> F[Feather Weights (GPU)]
-    D --> G[Per-Channel Exposure Gains (tile grid)]
+    A["Features + Matching"] --> B["Bundle Adjust"]
+    B --> C["Build Warp Maps (GPU)"]
+    B --> D["Warp Preview (CPU, seam scale)"]
+    D --> E["Seam Find (GraphCut)"]
+    E --> F["Feather Weights (GPU)"]
+    D --> G["Per-Channel Exposure Gains (tile grid)"]
   end
 
   subgraph "Runtime (each frame)"
-    U[Upload (pinned, async)] --> W[Warp (GPU, cached maps)]
-    W --> X[Exposure (CUDA, per-tile RGB)]
-    X --> Y[Blend (GPU, ROI + weights, normalize)]
+    U["Upload (pinned, async)"] --> W["Warp (GPU, cached maps)"]
+    W --> X["Exposure (CUDA, per-tile RGB)"]
+    X --> Y["Blend (GPU, ROI + weights, normalize)"]
     Y --> Z[Download]
   end
 
