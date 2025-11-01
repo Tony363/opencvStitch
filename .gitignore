@@ -1,12 +1,7 @@
-# ignore dot files/directories
-
-build/
-build/*
-
-
-*.autosave
+build-nocuda/*
+build-nocuda/
 *.pyc
-*.user
-*~
-tags
-tegra/
+*.env
+*.jpg
+*.png
+*.mp4
